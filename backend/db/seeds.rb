@@ -1,6 +1,6 @@
-business = Business.find_or_create_by!(commercial_name: "Ferreteria El Tornillo") do |record|
-  record.legal_name = "Ferreteria El Tornillo S.A. de C.V."
-  record.rfc = "FET240814AB1"
+business = Business.find_or_create_by!(commercial_name: "Nombre de empresa") do |record|
+  record.legal_name = "Razon social sin configurar"
+  record.rfc = "RFC sin configurar"
   record.primary_contact_name = "Luis Buendia"
   record.phone = "555-010-1840"
   record.whatsapp = "555-010-1840"
@@ -12,7 +12,7 @@ business = Business.find_or_create_by!(commercial_name: "Ferreteria El Tornillo"
 end
 
 branch = Branch.find_or_create_by!(business:, code: "TOL") do |record|
-  record.name = "Sucursal Centro"
+  record.name = "Nombre de sucursal"
   record.address = "Av. Ferreteros 120, Centro"
   record.timezone = "America/Mexico_City"
   record.currency = "MXN"

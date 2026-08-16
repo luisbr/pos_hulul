@@ -1,6 +1,10 @@
 class Business < ApplicationRecord
   STATUSES = %w[active suspended cancelled].freeze
   LICENSE_STATUSES = %w[trial active suspended cancelled].freeze
+  COMMERCIAL_NAME_PLACEHOLDER = "Nombre de empresa".freeze
+  LEGAL_NAME_PLACEHOLDER = "Razon social sin configurar".freeze
+  RFC_PLACEHOLDER = "RFC sin configurar".freeze
+  BRANCH_NAME_PLACEHOLDER = "Nombre de sucursal".freeze
 
   has_many :branches, dependent: :restrict_with_exception
   has_many :cash_registers, dependent: :restrict_with_exception
@@ -26,4 +30,26 @@ class Business < ApplicationRecord
   validates :commercial_name, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :license_status, inclusion: { in: LICENSE_STATUSES }
+
+  def setup_missing_fields(branch = nil)
+    [
+      ("commercial_name" if placeholder_or_blank?(commercial_name, COMMERCIAL_NAME_PLACEHOLDER)),
+      ("legal_name" if placeholder_or_blank?(legal_name, LEGAL_NAME_PLACEHOLDER)),
+      ("rfc" if placeholder_or_blank?(rfc, RFC_PLACEHOLDER)),
+      ("primary_contact_name" if primary_contact_name.blank?),
+      ("phone" if phone.blank?),
+      ("email" if email.blank?),
+      ("branch_name" if branch.nil? || placeholder_or_blank?(branch.name, BRANCH_NAME_PLACEHOLDER))
+    ].compact
+  end
+
+  def setup_complete?(branch = nil)
+    setup_missing_fields(branch).empty?
+  end
+
+  private
+
+  def placeholder_or_blank?(value, placeholder)
+    value.to_s.strip.blank? || value.to_s.strip == placeholder
+  end
 end

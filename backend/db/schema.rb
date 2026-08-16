@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_15_173000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_16_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -290,9 +290,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_15_173000) do
     t.integer "total_cents", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "cancelled_at"
+    t.text "cancellation_reason"
+    t.uuid "cancelled_by_id"
     t.index ["branch_id"], name: "index_purchases_on_branch_id"
     t.index ["business_id", "folio"], name: "index_purchases_on_business_id_and_folio", unique: true
     t.index ["business_id"], name: "index_purchases_on_business_id"
+    t.index ["cancelled_by_id"], name: "index_purchases_on_cancelled_by_id"
     t.index ["created_by_id"], name: "index_purchases_on_created_by_id"
     t.index ["supplier_id"], name: "index_purchases_on_supplier_id"
   end
@@ -451,6 +455,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_15_173000) do
   add_foreign_key "purchases", "branches"
   add_foreign_key "purchases", "businesses"
   add_foreign_key "purchases", "suppliers"
+  add_foreign_key "purchases", "users", column: "cancelled_by_id"
   add_foreign_key "purchases", "users", column: "created_by_id"
   add_foreign_key "sale_items", "businesses"
   add_foreign_key "sale_items", "products"

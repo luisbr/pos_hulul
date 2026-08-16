@@ -75,4 +75,110 @@ class Api::Portal::PurchasesControllerTest < ActionDispatch::IntegrationTest
     assert_equal 7, balance.quantity
     assert_equal 12_000, @product.reload.current_cost_cents
   end
+
+  test "cancels purchase and reverts stock when enough inventory exists" do
+    post api_portal_business_purchases_url(@business), params: {
+      purchase: {
+        branch_id: @branch.id,
+        supplier_id: @supplier.id,
+        created_by_id: @user.id,
+        purchased_at: Time.current.iso8601,
+        notes: "Compra a cancelar",
+        items: [
+          { product_id: @product.id, quantity: "5", unit_cost_cents: 11_500 }
+        ]
+      }
+    }, as: :json
+
+    purchase_id = response.parsed_body["id"]
+
+    assert_difference -> { InventoryMovement.where(movement_type: "negative_adjustment").count }, 1 do
+      post cancel_api_portal_business_purchase_url(@business, purchase_id), params: {
+        purchase: {
+          cancelled_by_id: @user.id,
+          cancellation_reason: "Error de captura"
+        }
+      }, as: :json
+    end
+
+    assert_response :success
+    body = response.parsed_body
+    assert_equal "cancelled", body["status"]
+    assert_equal "Error de captura", body["cancellation_reason"]
+    assert_equal @user.id, body["cancelled_by"]["id"]
+    assert_equal 0, InventoryBalance.find_by!(business: @business, branch: @branch, product: @product).quantity
+  end
+
+  test "blocks purchase cancellation when stock no longer reaches" do
+    post api_portal_business_purchases_url(@business), params: {
+      purchase: {
+        branch_id: @branch.id,
+        supplier_id: @supplier.id,
+        created_by_id: @user.id,
+        purchased_at: Time.current.iso8601,
+        notes: "Compra con venta posterior",
+        items: [
+          { product_id: @product.id, quantity: "5", unit_cost_cents: 11_500 }
+        ]
+      }
+    }, as: :json
+
+    purchase_id = response.parsed_body["id"]
+
+    Inventory::MovementRecorder.call(
+      business: @business,
+      branch: @branch,
+      product: @product,
+      movement_type: "sale",
+      quantity: 3,
+      unit: @unit,
+      reason: "Venta posterior",
+      created_by: @user
+    )
+
+    post cancel_api_portal_business_purchase_url(@business, purchase_id), params: {
+      purchase: {
+        cancelled_by_id: @user.id,
+        cancellation_reason: "Quiero revertirla"
+      }
+    }, as: :json
+
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["errors"].join(" "), "solo hay 2.0"
+    assert_equal "received", Purchase.find(purchase_id).status
+  end
+
+  test "blocks double cancellation" do
+    post api_portal_business_purchases_url(@business), params: {
+      purchase: {
+        branch_id: @branch.id,
+        supplier_id: @supplier.id,
+        created_by_id: @user.id,
+        purchased_at: Time.current.iso8601,
+        items: [
+          { product_id: @product.id, quantity: "2", unit_cost_cents: 10_500 }
+        ]
+      }
+    }, as: :json
+
+    purchase_id = response.parsed_body["id"]
+
+    post cancel_api_portal_business_purchase_url(@business, purchase_id), params: {
+      purchase: {
+        cancelled_by_id: @user.id,
+        cancellation_reason: "Cancelacion inicial"
+      }
+    }, as: :json
+    assert_response :success
+
+    post cancel_api_portal_business_purchase_url(@business, purchase_id), params: {
+      purchase: {
+        cancelled_by_id: @user.id,
+        cancellation_reason: "Segundo intento"
+      }
+    }, as: :json
+
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["errors"].join(" "), "ya esta cancelada"
+  end
 end

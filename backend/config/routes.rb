@@ -11,6 +11,7 @@ Rails.application.routes.draw do
       resources :businesses, only: [] do
         member do
           get :context
+          patch :settings
         end
 
         resource :cash_register_session, only: %i[create], controller: "cash_register_sessions" do
@@ -25,7 +26,9 @@ Rails.application.routes.draw do
           end
         end
         resources :customers, only: %i[index show create update]
-        resources :purchases, only: %i[index show create]
+        resources :purchases, only: %i[index show create] do
+          post :cancel, on: :member
+        end
         resources :suppliers, only: %i[index show create update]
         resources :inventory_movements, only: %i[index create]
         resources :products, only: %i[index show create update] do

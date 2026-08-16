@@ -1,7 +1,34 @@
 class Api::Portal::BusinessesController < ApplicationController
   def context
-    business = Business.includes(:branches, :cash_registers, :users).find(params[:id])
-    branch = business.branches.find(&:active)
+    render_context(portal_business)
+  end
+
+  def settings
+    return render json: { errors: [ "Sesion requerida" ] }, status: :unauthorized unless current_user
+
+    business = current_user.businesses.find(params[:id])
+    branch = business.branches.find_by!(active: true)
+
+    business.update!(business_params)
+    branch.update!(branch_params)
+
+    render_context(business.reload)
+  rescue ActiveRecord::RecordInvalid => error
+    render json: { errors: error.record.errors.full_messages }, status: :unprocessable_entity
+  end
+
+  private
+
+  def portal_business
+    Business.includes(:branches, :cash_registers, :users).find(params[:id])
+  end
+
+  def active_branch_for(business)
+    business.branches.find(&:active)
+  end
+
+  def render_context(business)
+    branch = active_branch_for(business)
     cash_register = branch && business.cash_registers.find { |register| register.branch_id == branch.id && register.active }
     cash_register_session = cash_register&.current_session
     operator = business.users.find_by(id: current_user&.id) || cash_register_session&.opened_by || business.users.order(:created_at).first
@@ -11,12 +38,23 @@ class Api::Portal::BusinessesController < ApplicationController
       business: {
         id: business.id,
         commercial_name: business.commercial_name,
+        legal_name: business.legal_name,
+        rfc: business.rfc,
+        primary_contact_name: business.primary_contact_name,
+        phone: business.phone,
+        whatsapp: business.whatsapp,
+        email: business.email,
         license_status: business.license_status
+      },
+      setup: {
+        complete: business.setup_complete?(branch),
+        missing: business.setup_missing_fields(branch)
       },
       branch: branch && {
         id: branch.id,
         name: branch.name,
         code: branch.code,
+        address: branch.address,
         timezone: branch.timezone,
         currency: branch.currency
       },
@@ -44,5 +82,21 @@ class Api::Portal::BusinessesController < ApplicationController
         }
       }
     }
+  end
+
+  def business_params
+    params.require(:business).permit(
+      :commercial_name,
+      :legal_name,
+      :rfc,
+      :primary_contact_name,
+      :phone,
+      :whatsapp,
+      :email
+    )
+  end
+
+  def branch_params
+    params.require(:branch).permit(:name, :address)
   end
 end

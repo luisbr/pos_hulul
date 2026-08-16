@@ -10,7 +10,9 @@ import {
   PackageSearch,
   Pencil,
   Plus,
+  Settings,
   ShoppingCart,
+  Tags,
   Trash2,
   Users,
   X,
@@ -21,16 +23,19 @@ import './App.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:3001'
 const AUTH_STORAGE_KEY = 'hulul.portal.session'
+const STALE_SESSION_ERROR = 'STALE_SESSION_ERROR'
 
 const navItems = [
   { label: 'Inicio', icon: Home },
   { label: 'Venta', icon: ShoppingCart },
   { label: 'Productos', icon: PackageSearch },
+  { label: 'Catalogos', icon: Tags },
   { label: 'Inventario', icon: Boxes },
   { label: 'Clientes', icon: Users },
   { label: 'Proveedores', icon: ClipboardList },
   { label: 'Compras', icon: ClipboardList },
   { label: 'Caja', icon: CreditCard },
+  { label: 'Configuracion', icon: Settings },
   { label: 'Reportes', icon: BarChart3 },
 ]
 
@@ -57,12 +62,23 @@ type PortalContext = {
   business: {
     id: string
     commercial_name: string
+    legal_name?: string | null
+    rfc?: string | null
+    primary_contact_name?: string | null
+    phone?: string | null
+    whatsapp?: string | null
+    email?: string | null
     license_status: string
+  }
+  setup: {
+    complete: boolean
+    missing: string[]
   }
   branch: {
     id: string
     name: string
     code: string
+    address?: string | null
   } | null
   cash_register: {
     id: string
@@ -214,11 +230,33 @@ type SupplierForm = {
   notes: string
 }
 
+type SettingsForm = {
+  commercial_name: string
+  legal_name: string
+  rfc: string
+  primary_contact_name: string
+  phone: string
+  whatsapp: string
+  email: string
+  branch_name: string
+  branch_address: string
+}
+
+type OnboardingStep = {
+  key: 'company' | 'unit' | 'category' | 'product' | 'supplier' | 'stock' | 'cash'
+  label: string
+  complete: boolean
+  actionLabel: string
+  view: 'Configuracion' | 'Catalogos' | 'Productos' | 'Proveedores' | 'Compras' | 'Inventario' | 'Caja'
+}
+
 type Purchase = {
   id: string
   folio: string
   status: string
   purchased_at: string
+  cancelled_at?: string | null
+  cancellation_reason?: string | null
   invoice_reference?: string | null
   notes?: string | null
   total_cents: number
@@ -235,6 +273,10 @@ type Purchase = {
     id: string
     name: string
   }
+  cancelled_by?: {
+    id: string
+    name: string
+  } | null
   items: Array<{
     id: string
     product: {
@@ -409,36 +451,6 @@ type CompletedSale = {
   }>
 }
 
-const fallbackProducts: Product[] = [
-  {
-    id: 'fallback-var',
-    sku: 'VAR-001',
-    name: 'Varilla corrugada 3/8',
-    sale_price_cents: 16000,
-    stock_quantity: '80.0',
-    stock_status: 'ok',
-    base_unit: { abbreviation: 'pza' },
-  },
-  {
-    id: 'fallback-cem',
-    sku: 'CEM-050',
-    name: 'Cemento gris 50 kg',
-    sale_price_cents: 23000,
-    stock_quantity: '38.0',
-    stock_status: 'ok',
-    base_unit: { abbreviation: 'bulto' },
-  },
-  {
-    id: 'fallback-tub',
-    sku: 'TUB-112',
-    name: 'Tubo PVC sanitario 2"',
-    sale_price_cents: 15500,
-    stock_quantity: '22.0',
-    stock_status: 'ok',
-    base_unit: { abbreviation: 'pza' },
-  },
-]
-
 function formatMoney(cents: number) {
   return new Intl.NumberFormat('es-MX', {
     style: 'currency',
@@ -511,6 +523,18 @@ const emptySupplierForm: SupplierForm = {
   payment_terms: '',
   active: true,
   notes: '',
+}
+
+const emptySettingsForm: SettingsForm = {
+  commercial_name: '',
+  legal_name: '',
+  rfc: '',
+  primary_contact_name: '',
+  phone: '',
+  whatsapp: '',
+  email: '',
+  branch_name: '',
+  branch_address: '',
 }
 
 const emptyPurchaseItem: PurchaseDraftItem = {
@@ -598,7 +622,7 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [activeView, setActiveView] = useState('Venta')
   const [portalContext, setPortalContext] = useState<PortalContext | null>(null)
-  const [products, setProducts] = useState<Product[]>(fallbackProducts)
+  const [products, setProducts] = useState<Product[]>([])
   const [apiStatus, setApiStatus] = useState<'loading' | 'ready' | 'offline'>('loading')
   const [isCharging, setIsCharging] = useState(false)
   const [saleMessage, setSaleMessage] = useState<string | null>(null)
@@ -610,6 +634,8 @@ function App() {
   const [productMode, setProductMode] = useState<'list' | 'form'>('list')
   const [productFilter, setProductFilter] = useState<'all' | 'low' | 'out' | 'inactive'>('all')
   const [isSavingProduct, setIsSavingProduct] = useState(false)
+  const [brandQuery, setBrandQuery] = useState('')
+  const [isQuickAddingBrand, setIsQuickAddingBrand] = useState(false)
   const [catalogType, setCatalogType] = useState<CatalogSection>('categories')
   const [catalogForm, setCatalogForm] = useState<CatalogForm>(emptyCatalogForm)
   const [isSavingCatalog, setIsSavingCatalog] = useState(false)
@@ -630,10 +656,15 @@ function App() {
   const [supplierQuery, setSupplierQuery] = useState('')
   const [supplierForm, setSupplierForm] = useState<SupplierForm>(emptySupplierForm)
   const [isSavingSupplier, setIsSavingSupplier] = useState(false)
+  const [settingsForm, setSettingsForm] = useState<SettingsForm>(emptySettingsForm)
+  const [isSavingSettings, setIsSavingSettings] = useState(false)
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [purchaseMode, setPurchaseMode] = useState<'list' | 'form'>('list')
   const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>(emptyPurchaseForm)
   const [isSavingPurchase, setIsSavingPurchase] = useState(false)
+  const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null)
+  const [purchaseCancelReason, setPurchaseCancelReason] = useState('')
+  const [isCancellingPurchase, setIsCancellingPurchase] = useState(false)
   const [saleView, setSaleView] = useState<'pos' | 'history' | 'detail'>('pos')
   const [saleStage, setSaleStage] = useState<'cart' | 'payment' | 'success'>('cart')
   const [checkoutForm, setCheckoutForm] = useState<CheckoutForm>(emptyCheckoutForm)
@@ -664,6 +695,33 @@ function App() {
     })
   }, [authSession])
 
+  const resetPortalState = useCallback(() => {
+    setPortalContext(null)
+    setCustomers([])
+    setSuppliers([])
+    setPurchases([])
+    setSelectedPurchase(null)
+    setPurchaseCancelReason('')
+    setProducts([])
+    setCatalogs({ categories: [], brands: [], units: [] })
+    setSettingsForm(emptySettingsForm)
+    setInventoryMovements([])
+    setCashMovements([])
+    setSales([])
+    setCartItems([])
+    setCompletedSale(null)
+    setSaleStage('cart')
+    setSaleView('pos')
+    setApiStatus('loading')
+  }, [])
+
+  const invalidateStoredSession = useCallback((message?: string) => {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY)
+    setAuthSession(null)
+    resetPortalState()
+    if (message) setLoginError(message)
+  }, [resetPortalState])
+
   const loadPortalData = useCallback(async () => {
     if (!authSession) throw new Error('No active session')
 
@@ -671,6 +729,9 @@ function App() {
     if (!business) throw new Error('No business assigned')
 
     const contextResponse = await apiFetch(`${API_BASE_URL}/api/portal/businesses/${business.id}/context`)
+    if (contextResponse.status === 401 || contextResponse.status === 403 || contextResponse.status === 404) {
+      throw new Error(STALE_SESSION_ERROR)
+    }
     if (!contextResponse.ok) throw new Error('Could not load portal context')
 
     const context = (await contextResponse.json()) as PortalContext
@@ -747,6 +808,17 @@ function App() {
           setPurchases(loadedPurchases)
           setProducts(loadedProducts)
           setCatalogs(loadedCatalogs)
+          setSettingsForm({
+            commercial_name: context.business.commercial_name || '',
+            legal_name: context.business.legal_name || '',
+            rfc: context.business.rfc || '',
+            primary_contact_name: context.business.primary_contact_name || '',
+            phone: context.business.phone || '',
+            whatsapp: context.business.whatsapp || '',
+            email: context.business.email || '',
+            branch_name: context.branch?.name || '',
+            branch_address: context.branch?.address || '',
+          })
           setInventoryMovements(loadedMovements)
           setCashMovements(loadedCashMovements)
           setSales(loadedSales)
@@ -764,10 +836,26 @@ function App() {
             ...form,
             counted_cash: form.counted_cash || centsToInput(context.cash_register_session?.expected_cash_cents),
           }))
+          const onboardingReady =
+            context.setup.complete &&
+            loadedCatalogs.units.length > 0 &&
+            loadedCatalogs.categories.length > 0 &&
+            loadedProducts.length > 0 &&
+            loadedProducts.some((product) => Number(product.stock_quantity) > 0 && product.active !== false) &&
+            context.cash_register_session?.status === 'open'
+          setActiveView((currentView) => (onboardingReady ? currentView : 'Configuracion'))
+          if (!onboardingReady) setSaleMessage('Completa la configuracion operativa antes de vender.')
           setApiStatus('ready')
         }
-      } catch {
-        if (!cancelled) setApiStatus('offline')
+      } catch (error) {
+        if (cancelled) return
+
+        if (error instanceof Error && error.message === STALE_SESSION_ERROR) {
+          invalidateStoredSession('La sesion guardada ya no coincide con la base actual. Inicia sesion de nuevo.')
+          return
+        }
+
+        setApiStatus('offline')
       }
     }
 
@@ -776,7 +864,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [authSession, loadPortalData])
+  }, [authSession, invalidateStoredSession, loadPortalData])
 
   async function handleLogin() {
     setIsLoggingIn(true)
@@ -807,26 +895,11 @@ function App() {
   }
 
   function handleLogout() {
-    window.localStorage.removeItem(AUTH_STORAGE_KEY)
-    setAuthSession(null)
-    setPortalContext(null)
-    setCustomers([])
-    setSuppliers([])
-    setPurchases([])
-    setProducts(fallbackProducts)
-    setCatalogs({ categories: [], brands: [], units: [] })
-    setInventoryMovements([])
-    setCashMovements([])
-    setSales([])
-    setCartItems([])
-    setCompletedSale(null)
-    setSaleStage('cart')
-    setSaleView('pos')
-    setApiStatus('loading')
+    invalidateStoredSession()
   }
 
-  const businessName = portalContext?.business.commercial_name ?? 'Ferreteria El Tornillo'
-  const branchName = portalContext?.branch?.name ?? 'Sucursal Centro'
+  const businessName = portalContext?.business.commercial_name?.trim() || 'Negocio sin configurar'
+  const branchName = portalContext?.branch?.name?.trim() || 'Sucursal sin configurar'
   const branchCode = portalContext?.branch?.code ?? 'TOL'
   const cashRegisterCode = portalContext?.cash_register?.code ?? '001'
   const nextFolio = portalContext?.cash_register?.current_folio_number ?? 43
@@ -891,7 +964,19 @@ function App() {
   }))
   const ticketTotalCents = ticketItems.reduce((sum, item) => sum + item.totalCents, 0)
   const hasStockIssue = ticketItems.some((item) => item.quantity > item.stockQuantity)
-  const canCharge = apiStatus === 'ready' && ticketItems.length > 0 && !hasStockIssue && !isCharging
+  const checkoutBlockerMessage =
+    apiStatus !== 'ready'
+      ? apiStatus === 'loading'
+        ? 'Cargando datos del POS.'
+        : 'Sin conexion con el servidor.'
+      : ticketItems.length === 0
+        ? 'Agrega al menos un producto.'
+        : !cashSession || cashSession.status !== 'open'
+          ? 'Abre una caja antes de cobrar.'
+          : hasStockIssue
+            ? 'Corrige el stock antes de cobrar.'
+            : null
+  const isCheckoutActionDisabled = isCharging || apiStatus === 'loading'
   const publicCustomer = customers.find((customer) => customer.public_customer) || customers.find((customer) => customer.active)
   const checkoutCashReceivedCents = moneyInputToCents(checkoutForm.cash_received || '0')
   const checkoutChangeCents = Math.max(checkoutCashReceivedCents - ticketTotalCents, 0)
@@ -921,13 +1006,81 @@ function App() {
     Inicio: 'Resumen operativo',
     Venta: 'Punto de venta',
     Productos: 'Productos',
+    Catalogos: 'Catalogos base',
     Inventario: 'Inventario',
     Clientes: 'Clientes',
     Proveedores: 'Proveedores',
     Compras: 'Compras',
     Caja: 'Caja',
+    Configuracion: 'Configuracion de empresa',
   }
+  const isCashOpen = cashSession?.status === 'open'
+  const hasUnits = catalogs.units.length > 0
+  const hasCategories = catalogs.categories.length > 0
+  const hasSuppliers = suppliers.some((supplier) => supplier.active)
+  const hasProducts = products.length > 0
+  const hasSellableStock = products.some((product) => Number(product.stock_quantity) > 0 && product.active !== false)
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      key: 'company',
+      label: 'Empresa configurada',
+      complete: portalContext?.setup.complete ?? false,
+      actionLabel: 'Completar empresa',
+      view: 'Configuracion',
+    },
+    {
+      key: 'unit',
+      label: 'Unidad minima',
+      complete: hasUnits,
+      actionLabel: 'Crear unidad',
+      view: 'Catalogos',
+    },
+    {
+      key: 'category',
+      label: 'Categoria minima',
+      complete: hasCategories,
+      actionLabel: 'Crear categoria',
+      view: 'Catalogos',
+    },
+    {
+      key: 'product',
+      label: 'Primer producto',
+      complete: hasProducts,
+      actionLabel: 'Crear producto',
+      view: 'Productos',
+    },
+    {
+      key: 'supplier',
+      label: 'Primer proveedor',
+      complete: hasSuppliers,
+      actionLabel: 'Crear proveedor',
+      view: 'Proveedores',
+    },
+    {
+      key: 'stock',
+      label: hasSuppliers ? 'Primera compra recibida' : 'Carga inicial de inventario',
+      complete: hasSellableStock,
+      actionLabel: hasSuppliers ? 'Registrar compra' : 'Cargar inventario inicial',
+      view: hasSuppliers ? 'Compras' : 'Inventario',
+    },
+    {
+      key: 'cash',
+      label: 'Caja abierta',
+      complete: isCashOpen,
+      actionLabel: 'Abrir caja',
+      view: 'Caja',
+    },
+  ]
+  const onboardingLocked = portalContext != null && onboardingSteps.some((step) => !step.complete)
+  const firstPendingStep = onboardingSteps.find((step) => !step.complete) || null
+  const pendingOnboardingCount = onboardingSteps.filter((step) => !step.complete).length
+  const onboardingAllowedViews = new Set(['Configuracion', 'Catalogos', 'Productos', 'Proveedores', 'Compras', 'Inventario', 'Caja'])
+  const isProductWorkspace = activeView === 'Productos' || activeView === 'Catalogos'
+  const isSalePosView = saleView === 'pos'
   const currentTitle = viewTitles[activeView] ?? activeView
+  const mobilePrimaryNavItems = onboardingLocked
+    ? navItems.filter((item) => onboardingAllowedViews.has(item.label))
+    : navItems.filter((item) => ['Inicio', 'Venta', 'Productos', 'Inventario'].includes(item.label))
   const searchedProducts = normalizedSearchQuery
     ? products.filter((product) =>
       [product.sku, product.barcode, product.name]
@@ -942,6 +1095,8 @@ function App() {
     inactive: products.filter((product) => product.active === false).length,
   }
   const visibleCatalogs = catalogs[catalogType]
+  const exactBrandMatch = catalogs.brands.find((brand) => brand.name.trim().toLowerCase() === brandQuery.trim().toLowerCase())
+  const canQuickAddBrand = brandQuery.trim().length > 0 && !exactBrandMatch
   const visibleProducts = searchedProducts.filter((product) => {
     if (productFilter === 'low') return product.stock_status === 'low'
     if (productFilter === 'out') return product.stock_status === 'out'
@@ -1008,6 +1163,10 @@ function App() {
   }
 
   function startCheckout() {
+    if (apiStatus !== 'ready') {
+      setSaleMessage(apiStatus === 'loading' ? 'Espera a que cargue el POS.' : 'Sin conexion con el servidor.')
+      return
+    }
     if (!portalContext?.branch || !portalContext.cash_register || !cashSession || cashSession.status !== 'open') {
       setSaleMessage('Abre una caja antes de cobrar.')
       return
@@ -1213,9 +1372,134 @@ function App() {
     setSaleMessage(`${feature} estara disponible pronto.`)
   }
 
+  function openCashFromPos() {
+    setActiveView('Caja')
+    setCashMode('open')
+    setSaleMessage(null)
+    setSaleView('pos')
+    setSelectedSale(null)
+  }
+
+  function goToOnboardingTarget(step: OnboardingStep) {
+    setSaleMessage(null)
+    if (step.view === 'Configuracion') {
+      setActiveView('Configuracion')
+      return
+    }
+
+    if (step.view === 'Catalogos') {
+      setActiveView('Catalogos')
+      if (step.key === 'unit') setCatalogType('units')
+      if (step.key === 'category') setCatalogType('categories')
+      setCatalogForm(emptyCatalogForm)
+      return
+    }
+
+    if (step.view === 'Productos') {
+      setActiveView('Productos')
+      setProductSection('products')
+      startNewProduct()
+      return
+    }
+
+    if (step.view === 'Proveedores') {
+      setActiveView('Proveedores')
+      startNewSupplier()
+      return
+    }
+
+    if (step.view === 'Compras') {
+      setActiveView('Compras')
+      startNewPurchase()
+      return
+    }
+
+    if (step.view === 'Inventario') {
+      setActiveView('Inventario')
+      startInventoryMovement(products[0])
+      return
+    }
+
+    if (step.view === 'Caja') {
+      setActiveView('Caja')
+      setCashMode('open')
+    }
+  }
+
+  function renderNavLabel(label: string) {
+    return (
+      <span className="nav-label">
+        <span>{label}</span>
+        {label === 'Configuracion' && pendingOnboardingCount > 0 ? (
+          <span className="nav-badge" aria-label={`${pendingOnboardingCount} pendientes`}>
+            {pendingOnboardingCount}
+          </span>
+        ) : null}
+      </span>
+    )
+  }
+
+  async function saveSettings() {
+    if (!portalContext?.business.id || !portalContext.branch?.id) return
+
+    setIsSavingSettings(true)
+    setSaleMessage(null)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/api/portal/businesses/${portalContext.business.id}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          business: {
+            commercial_name: settingsForm.commercial_name,
+            legal_name: settingsForm.legal_name,
+            rfc: settingsForm.rfc,
+            primary_contact_name: settingsForm.primary_contact_name,
+            phone: settingsForm.phone,
+            whatsapp: settingsForm.whatsapp,
+            email: settingsForm.email,
+          },
+          branch: {
+            name: settingsForm.branch_name,
+            address: settingsForm.branch_address,
+          },
+        }),
+      })
+
+      const body = (await response.json()) as PortalContext & { errors?: string[] }
+      if (!response.ok) throw new Error(body.errors?.join(', ') ?? 'No se pudo guardar la configuracion.')
+
+      setPortalContext(body)
+      setSettingsForm({
+        commercial_name: body.business.commercial_name || '',
+        legal_name: body.business.legal_name || '',
+        rfc: body.business.rfc || '',
+        primary_contact_name: body.business.primary_contact_name || '',
+        phone: body.business.phone || '',
+        whatsapp: body.business.whatsapp || '',
+        email: body.business.email || '',
+        branch_name: body.branch?.name || '',
+        branch_address: body.branch?.address || '',
+      })
+      setSaleMessage(body.setup.complete ? 'Configuracion guardada. Ya puedes operar.' : 'Configuracion guardada.')
+      if (body.setup.complete) setActiveView('Inicio')
+    } catch (error) {
+      setSaleMessage(error instanceof Error ? error.message : 'No se pudo guardar la configuracion.')
+    } finally {
+      setIsSavingSettings(false)
+    }
+  }
+
   function goToView(label: string) {
+    if (onboardingLocked && !onboardingAllowedViews.has(label)) {
+      setActiveView('Configuracion')
+      setSaleMessage(`Antes de continuar: ${firstPendingStep?.label || 'completa la configuracion operativa'}.`)
+      return
+    }
     setActiveView(label)
     setSaleMessage(null)
+    if (label === 'Productos') setProductSection('products')
+    if (label === 'Catalogos') setProductSection('catalogs')
     if (label !== 'Venta') {
       setSaleView('pos')
       setSelectedSale(null)
@@ -1228,6 +1512,92 @@ function App() {
     setSaleView('detail')
     setSaleCancelReason('')
     setSaleMessage(null)
+  }
+
+  function printSaleReceipt(sale: CompletedSale) {
+    const printWindow = window.open('', '_blank', 'width=420,height=820')
+    if (!printWindow) {
+      setSaleMessage('No se pudo abrir la impresion. Revisa el bloqueador de ventanas.')
+      return
+    }
+
+    const paymentLabels = {
+      cash: 'Efectivo',
+      card: 'Tarjeta',
+      transfer: 'Transferencia',
+      mixed: 'Mixto',
+    } as const
+
+    const itemsMarkup = sale.items.map((item) => `
+      <tr>
+        <td style="padding:6px 0; vertical-align:top;">
+          <div style="font-weight:700;">${item.product_name}</div>
+          <div style="font-size:12px; color:#667085;">${item.sku} · ${item.quantity} ${item.unit}</div>
+        </td>
+        <td style="padding:6px 0; text-align:right; vertical-align:top; font-weight:700;">${formatMoney(item.total_cents)}</td>
+      </tr>
+    `).join('')
+
+    const paymentsMarkup = sale.payments.map((payment) => `
+      <tr>
+        <td style="padding:4px 0;">${paymentLabels[payment.payment_method as keyof typeof paymentLabels] || payment.payment_method}</td>
+        <td style="padding:4px 0; text-align:right;">${formatMoney(payment.amount_cents)}</td>
+      </tr>
+    `).join('')
+
+    const receiptHtml = `
+      <!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8" />
+          <title>Ticket ${sale.folio}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:#101828; margin:0; padding:24px; }
+            .ticket { max-width: 360px; margin: 0 auto; }
+            .muted { color:#667085; font-size:12px; }
+            .block { margin-bottom:16px; }
+            .title { font-size:20px; font-weight:800; margin-bottom:4px; }
+            table { width:100%; border-collapse:collapse; }
+            .total { border-top:1px dashed #d0d5dd; margin-top:10px; padding-top:10px; font-size:18px; font-weight:800; display:flex; justify-content:space-between; }
+          </style>
+        </head>
+        <body>
+          <div class="ticket">
+            <div class="block">
+              <div class="title">${businessName}</div>
+              <div class="muted">${branchName}</div>
+            </div>
+            <div class="block">
+              <div><strong>Folio:</strong> ${sale.folio}</div>
+              <div><strong>Fecha:</strong> ${new Date(sale.created_at).toLocaleString('es-MX')}</div>
+              <div><strong>Cliente:</strong> ${sale.customer?.commercial_name || 'Publico en general'}</div>
+              <div><strong>Cajero:</strong> ${sale.cashier.name}</div>
+            </div>
+            <div class="block">
+              <table>${itemsMarkup}</table>
+            </div>
+            <div class="block">
+              <table>${paymentsMarkup}</table>
+            </div>
+            <div class="total">
+              <span>Total</span>
+              <span>${formatMoney(sale.total_cents)}</span>
+            </div>
+          </div>
+          <script>
+            window.onload = () => {
+              window.print();
+              window.onafterprint = () => window.close();
+            };
+          </script>
+        </body>
+      </html>
+    `
+
+    printWindow.document.open()
+    printWindow.document.write(receiptHtml)
+    printWindow.document.close()
+    setSaleMessage(`Ticket ${sale.folio} enviado a impresion.`)
   }
 
   async function cancelSelectedSale() {
@@ -1284,9 +1654,10 @@ function App() {
     setProductForm({
       ...emptyProductForm,
       category_id: catalogs.categories[0]?.id || '',
-      brand_id: catalogs.brands[0]?.id || '',
+      brand_id: '',
       base_unit_id: catalogs.units[0]?.id || '',
     })
+    setBrandQuery('')
     setProductMode('form')
     setSaleMessage(null)
   }
@@ -1309,6 +1680,16 @@ function App() {
   }
 
   function startNewPurchase() {
+    if (!hasSuppliers) {
+      setActiveView('Proveedores')
+      setSaleMessage('Primero crea un proveedor o usa carga inicial desde Inventario.')
+      return
+    }
+    if (!hasProducts) {
+      setActiveView('Productos')
+      setSaleMessage('Primero crea al menos un producto para registrar compras.')
+      return
+    }
     setPurchaseForm({
       ...emptyPurchaseForm,
       supplier_id: suppliers[0]?.id || '',
@@ -1320,6 +1701,14 @@ function App() {
       ],
     })
     setPurchaseMode('form')
+    setSelectedPurchase(null)
+    setPurchaseCancelReason('')
+    setSaleMessage(null)
+  }
+
+  function startCancelPurchase(purchase: Purchase) {
+    setSelectedPurchase(purchase)
+    setPurchaseCancelReason('')
     setSaleMessage(null)
   }
 
@@ -1359,8 +1748,37 @@ function App() {
       allows_fractional_sale: Boolean(product.allows_fractional_sale),
       active: product.active !== false,
     })
+    setBrandQuery(product.brand || '')
     setProductMode('form')
     setSaleMessage(null)
+  }
+
+  async function createCatalogOption(type: CatalogSection, form: CatalogForm) {
+    if (!portalContext?.business.id) throw new Error('No hay negocio activo.')
+
+    const payload = {
+      catalog: {
+        name: form.name,
+        abbreviation: type === 'units' ? form.abbreviation : undefined,
+        active: form.active,
+      },
+    }
+
+    const baseUrl = `${API_BASE_URL}/api/portal/businesses/${portalContext.business.id}/catalogs/${type}`
+    const response = await apiFetch(form.id ? `${baseUrl}/${form.id}` : baseUrl, {
+      method: form.id ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await response.json()
+    if (!response.ok) throw new Error(body.errors?.join(', ') ?? 'No se pudo guardar catalogo')
+
+    const { catalogs: loadedCatalogs } = await loadPortalData()
+    setCatalogs(loadedCatalogs)
+    return {
+      body,
+      catalogs: loadedCatalogs,
+    }
   }
 
   function editCustomer(customer: Customer) {
@@ -1404,6 +1822,10 @@ function App() {
 
   async function saveProduct(form = productForm) {
     if (!portalContext?.business.id) return
+    if (brandQuery.trim().length > 0 && !form.brand_id) {
+      setSaleMessage('La marca escrita no existe todavia. Agregala primero o deja el campo vacio.')
+      return
+    }
 
     setIsSavingProduct(true)
     setSaleMessage(null)
@@ -1468,32 +1890,42 @@ function App() {
     setIsSavingCatalog(true)
     setSaleMessage(null)
 
-    const payload = {
-      catalog: {
-        name: form.name,
-        abbreviation: catalogType === 'units' ? form.abbreviation : undefined,
-        active: form.active,
-      },
-    }
-
     try {
-      const baseUrl = `${API_BASE_URL}/api/portal/businesses/${portalContext.business.id}/catalogs/${catalogType}`
-      const response = await apiFetch(form.id ? `${baseUrl}/${form.id}` : baseUrl, {
-        method: form.id ? 'PATCH' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const body = await response.json()
-      if (!response.ok) throw new Error(body.errors?.join(', ') ?? 'No se pudo guardar catalogo')
-
-      const { catalogs: loadedCatalogs } = await loadPortalData()
-      setCatalogs(loadedCatalogs)
+      const { body } = await createCatalogOption(catalogType, form)
       setCatalogForm(emptyCatalogForm)
       setSaleMessage(`Catalogo ${body.name} guardado.`)
     } catch (error) {
       setSaleMessage(error instanceof Error ? error.message : 'No se pudo guardar catalogo.')
     } finally {
       setIsSavingCatalog(false)
+    }
+  }
+
+  async function quickAddBrand() {
+    if (!brandQuery.trim()) return
+
+    setIsQuickAddingBrand(true)
+    setSaleMessage(null)
+
+    try {
+      const { body, catalogs: loadedCatalogs } = await createCatalogOption('brands', {
+        name: brandQuery.trim(),
+        abbreviation: '',
+        active: true,
+      })
+      const createdBrand = loadedCatalogs.brands.find((brand) => brand.id === body.id) ||
+        loadedCatalogs.brands.find((brand) => brand.name.trim().toLowerCase() === body.name.trim().toLowerCase())
+
+      setProductForm((form) => ({
+        ...form,
+        brand_id: createdBrand?.id || '',
+      }))
+      setBrandQuery(createdBrand?.name || body.name)
+      setSaleMessage(`Marca ${body.name} agregada.`)
+    } catch (error) {
+      setSaleMessage(error instanceof Error ? error.message : 'No se pudo agregar la marca.')
+    } finally {
+      setIsQuickAddingBrand(false)
     }
   }
 
@@ -1659,6 +2091,14 @@ function App() {
   async function savePurchase() {
     if (!portalContext?.business.id || !portalContext.branch || !actingUserId) return
 
+    if (!hasSuppliers) {
+      setSaleMessage('Primero crea un proveedor.')
+      return
+    }
+    if (!hasProducts) {
+      setSaleMessage('Primero crea al menos un producto.')
+      return
+    }
     const normalizedItems = purchaseForm.items.filter((item) => item.product_id && Number(item.quantity) > 0 && Number(item.unit_cost) > 0)
     if (!purchaseForm.supplier_id) {
       setSaleMessage('Selecciona un proveedor.')
@@ -1705,11 +2145,55 @@ function App() {
       setInventoryMovements(loadedMovements)
       setPurchaseMode('list')
       setPurchaseForm(emptyPurchaseForm)
+      setSelectedPurchase(null)
+      setPurchaseCancelReason('')
       setSaleMessage(`Compra ${body.folio} registrada.`)
     } catch (error) {
       setSaleMessage(error instanceof Error ? error.message : 'No se pudo registrar compra.')
     } finally {
       setIsSavingPurchase(false)
+    }
+  }
+
+  async function cancelSelectedPurchase() {
+    if (!selectedPurchase || !portalContext?.business.id || !actingUserId) return
+    if (!purchaseCancelReason.trim()) {
+      setSaleMessage('Captura motivo de cancelacion.')
+      return
+    }
+
+    setIsCancellingPurchase(true)
+    setSaleMessage(null)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/api/portal/businesses/${portalContext.business.id}/purchases/${selectedPurchase.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          purchase: {
+            cancelled_by_id: actingUserId,
+            cancellation_reason: purchaseCancelReason,
+          },
+        }),
+      })
+      const body = (await response.json()) as Purchase & { errors?: string[] }
+      if (!response.ok) throw new Error(body.errors?.join(', ') ?? 'No se pudo cancelar compra')
+
+      const {
+        purchases: loadedPurchases,
+        products: loadedProducts,
+        inventoryMovements: loadedMovements,
+      } = await loadPortalData()
+      setPurchases(loadedPurchases)
+      setProducts(loadedProducts)
+      setInventoryMovements(loadedMovements)
+      setSelectedPurchase(body)
+      setPurchaseCancelReason('')
+      setSaleMessage(`Compra ${body.folio} cancelada.`)
+    } catch (error) {
+      setSaleMessage(error instanceof Error ? error.message : 'No se pudo cancelar compra.')
+    } finally {
+      setIsCancellingPurchase(false)
     }
   }
 
@@ -2089,12 +2573,13 @@ function App() {
           {navItems.map(({ label, icon: Icon }) => (
             <button
               className={label === activeView ? 'active' : ''}
+              disabled={onboardingLocked && !onboardingAllowedViews.has(label)}
               key={label}
               onClick={() => goToView(label)}
               type="button"
             >
               <Icon size={18} strokeWidth={2.2} />
-              {label}
+              {renderNavLabel(label)}
             </button>
           ))}
         </nav>
@@ -2137,7 +2622,21 @@ function App() {
           </div>
         </header>
 
-        {activeView !== 'Productos' ? (
+        {onboardingLocked ? (
+          <section className="setup-banner" role="status">
+            <div>
+              <strong>Configuracion pendiente</strong>
+              <span>
+                Faltan {pendingOnboardingCount} puntos. Actual: {firstPendingStep?.label || 'Configuracion pendiente'}
+              </span>
+            </div>
+            <button className="secondary-button" onClick={() => goToView('Configuracion')} type="button">
+              Revisar
+            </button>
+          </section>
+        ) : null}
+
+        {!isProductWorkspace && !onboardingLocked && activeView !== 'Configuracion' ? (
           <section className="metrics-grid" aria-label="Resumen operativo">
             {operationalMetrics.map((metric) => (
               <article className="metric-card" key={metric.label}>
@@ -2149,7 +2648,7 @@ function App() {
           </section>
         ) : null}
 
-	        {activeView === 'Venta' || activeView === 'Inicio' ? (
+	        {!onboardingLocked && (activeView === 'Venta' || activeView === 'Inicio') ? (
 	        <section className="pos-grid">
 		          <article className="sale-panel">
 		            <div className="section-header">
@@ -2189,13 +2688,26 @@ function App() {
 		              </div>
 		            ) : null}
 
-		            {activeView === 'Inicio' || saleView === 'pos' ? (
+		            {isSalePosView ? (
 		              <>
 		            {saleStage === 'cart' ? (
+		              <div className={isCashOpen ? 'pos-cart-surface' : 'pos-cart-surface locked'}>
+                  {!isCashOpen ? (
+                    <div className="cash-lock-banner" role="status">
+                      <div>
+                        <strong>Caja cerrada</strong>
+                        <span>Abre caja para buscar productos y empezar a vender.</span>
+                      </div>
+                      <button className="primary-button" onClick={openCashFromPos} type="button">
+                        Abrir caja
+                      </button>
+                    </div>
+                  ) : null}
 		              <>
 		                <label className="search-box">
 	                  <span>Buscar producto</span>
 	                  <input
+	                    disabled={!isCashOpen}
 	                    onChange={(event) => setSearchQuery(event.target.value)}
 	                    placeholder="SKU, codigo de barras o nombre"
 	                    value={searchQuery}
@@ -2206,7 +2718,7 @@ function App() {
 	                  {searchResults.map((product) => (
 	                    <button
 	                      className="product-result"
-	                      disabled={product.stock_status === 'out'}
+	                      disabled={!isCashOpen || product.stock_status === 'out'}
 	                      key={product.id}
 	                      onClick={() => addProductToCart(product)}
 	                      type="button"
@@ -2238,29 +2750,31 @@ function App() {
 	                        {item.quantity > item.stockQuantity && <small>Stock disponible: {formatQuantity(item.stockQuantity)}</small>}
 	                      </div>
 	                      <div className="quantity-control">
-	                        <button aria-label={`Restar ${item.name}`} onClick={() => updateCartQuantity(item.productId, item.quantity - 1)} type="button">
+	                        <button aria-label={`Restar ${item.name}`} disabled={!isCashOpen} onClick={() => updateCartQuantity(item.productId, item.quantity - 1)} type="button">
 	                          <Minus size={15} strokeWidth={2.4} />
 	                        </button>
 	                        <input
 	                          aria-label={`Cantidad ${item.name}`}
+	                          disabled={!isCashOpen}
 	                          min="0"
 	                          onChange={(event) => updateCartQuantity(item.productId, Number(event.target.value))}
 	                          step={products.find((product) => product.id === item.productId)?.allows_fractional_sale ? '0.01' : '1'}
 	                          type="number"
 	                          value={item.quantity}
 	                        />
-	                        <button aria-label={`Sumar ${item.name}`} onClick={() => updateCartQuantity(item.productId, item.quantity + 1)} type="button">
+	                        <button aria-label={`Sumar ${item.name}`} disabled={!isCashOpen} onClick={() => updateCartQuantity(item.productId, item.quantity + 1)} type="button">
 	                          <Plus size={15} strokeWidth={2.4} />
 	                        </button>
 	                      </div>
 	                      <b>{item.total}</b>
-	                      <button aria-label={`Quitar ${item.name}`} className="remove-line" onClick={() => updateCartQuantity(item.productId, 0)} type="button">
+	                      <button aria-label={`Quitar ${item.name}`} className="remove-line" disabled={!isCashOpen} onClick={() => updateCartQuantity(item.productId, 0)} type="button">
 	                        <Trash2 size={16} strokeWidth={2.3} />
 	                      </button>
 	                    </div>
 	                  ))}
 	                </div>
 	              </>
+	            </div>
 	            ) : null}
 
 	            {saleStage === 'payment' ? (
@@ -2467,10 +2981,7 @@ function App() {
 	                  <button className="ghost-button" onClick={resetCheckout} type="button">Cerrar ticket</button>
 	                  <button
 	                    className="primary-button"
-	                    onClick={() => {
-	                      resetCheckout()
-	                      setSaleMessage('Ticket listo.')
-	                    }}
+	                    onClick={() => printSaleReceipt(completedSale)}
 	                    type="button"
 	                  >
 	                    Imprimir
@@ -2478,6 +2989,8 @@ function App() {
 		                </div>
 		              </div>
 		            ) : null}
+              </>
+            ) : null}
 
 		            {saleView === 'history' ? (
 		              <div className="product-list-view sales-history-view">
@@ -2573,6 +3086,11 @@ function App() {
 		                    </article>
 		                  ))}
 		                </div>
+                    <div className="actions-row form-actions">
+                      <button className="ghost-button" onClick={() => printSaleReceipt(selectedSale)} type="button">
+                        Imprimir ticket
+                      </button>
+                    </div>
 		                {selectedSale.status !== 'cancelled' ? (
 		                  <form
 		                    className="product-form sale-cancel-form"
@@ -2605,7 +3123,7 @@ function App() {
 		              </div>
 		            ) : null}
 
-		            {activeView === 'Inicio' || saleView === 'pos' ? (
+		            {isSalePosView ? (
 		            <div className="total-box">
 		              <div>
 		                <span>IVA incluido</span>
@@ -2615,17 +3133,18 @@ function App() {
 		            </div>
 		            ) : null}
 
-		            {(activeView === 'Inicio' || saleView === 'pos') && saleStage === 'cart' ? (
+		            {isSalePosView && saleStage === 'cart' ? (
 		              <div className="actions-row">
 		                <button className="ghost-button" onClick={clearCart} type="button">Cancelar</button>
-		                <button className="primary-button" disabled={!canCharge} onClick={startCheckout} type="button">
+		                <button className="primary-button" disabled={isCheckoutActionDisabled} onClick={startCheckout} type="button">
 		                  Ir a cobro
 		                </button>
 		              </div>
 		            ) : null}
-		              </>
-		            ) : null}
-		            {saleMessage && <p className="sale-message">{saleMessage}</p>}
+                {isSalePosView && saleStage === 'cart' && checkoutBlockerMessage ? (
+                  <p className="sale-message checkout-hint">{checkoutBlockerMessage}</p>
+                ) : null}
+			            {saleMessage && <p className="sale-message">{saleMessage}</p>}
 		          </article>
 
           <aside className="side-panel">
@@ -2674,9 +3193,6 @@ function App() {
               <div className="filter-chips sale-tabs" aria-label="Secciones de productos">
                 <button className={productSection === 'products' ? 'active' : ''} onClick={() => setProductSection('products')} type="button">
                   Productos <span>{products.length}</span>
-                </button>
-                <button className={productSection === 'catalogs' ? 'active' : ''} onClick={() => setProductSection('catalogs')} type="button">
-                  Catalogos
                 </button>
                 <button className={productSection === 'import' ? 'active' : ''} onClick={() => setProductSection('import')} type="button">
                   Importar
@@ -2782,15 +3298,42 @@ function App() {
                         </label>
                         <label>
                           <span>Marca</span>
-                          <select
-                            onChange={(event) => setProductForm((form) => ({ ...form, brand_id: event.target.value }))}
-                            value={productForm.brand_id}
-                          >
-                            <option value="">Sin marca</option>
-                            {catalogs.brands.map((brand) => (
-                              <option key={brand.id} value={brand.id}>{brand.name}</option>
-                            ))}
-                          </select>
+                          <div className="inline-action-field">
+                            <input
+                              list="brand-options"
+                              onBlur={() => {
+                                if (exactBrandMatch) {
+                                  setProductForm((form) => ({ ...form, brand_id: exactBrandMatch.id }))
+                                  setBrandQuery(exactBrandMatch.name)
+                                }
+                              }}
+                              onChange={(event) => {
+                                const value = event.target.value
+                                const match = catalogs.brands.find((brand) => brand.name.trim().toLowerCase() === value.trim().toLowerCase())
+                                setBrandQuery(value)
+                                setProductForm((form) => ({ ...form, brand_id: match?.id || '' }))
+                              }}
+                              placeholder="Escribe para buscar o crear"
+                              value={brandQuery}
+                            />
+                            <datalist id="brand-options">
+                              {catalogs.brands.map((brand) => (
+                                <option key={brand.id} value={brand.name} />
+                              ))}
+                            </datalist>
+                            {canQuickAddBrand ? (
+                              <button className="secondary-button inline-action-button" disabled={isQuickAddingBrand} onClick={() => void quickAddBrand()} type="button">
+                                {isQuickAddingBrand ? 'Agregando...' : 'Agregar marca'}
+                              </button>
+                            ) : null}
+                          </div>
+                          <small className="field-hint">
+                            {productForm.brand_id
+                              ? 'Marca seleccionada.'
+                              : brandQuery.trim()
+                                ? 'La marca escrita no existe todavia.'
+                                : 'Opcional.'}
+                          </small>
                         </label>
                       </div>
 
@@ -2957,107 +3500,6 @@ function App() {
                     </div>
                   )}
                 </>
-              ) : productSection === 'catalogs' ? (
-                <div className="catalogs-layout">
-                  <div className="products-command catalogs-command">
-                    <div className="filter-chips" aria-label="Tipos de catalogo">
-                      {[
-                        { key: 'categories', label: 'Categorias', count: catalogs.categories.length },
-                        { key: 'brands', label: 'Marcas', count: catalogs.brands.length },
-                        { key: 'units', label: 'Unidades', count: catalogs.units.length },
-                      ].map((section) => (
-                        <button
-                          className={catalogType === section.key ? 'active' : ''}
-                          key={section.key}
-                          onClick={() => {
-                            setCatalogType(section.key as CatalogSection)
-                            setCatalogForm(emptyCatalogForm)
-                          }}
-                          type="button"
-                        >
-                          {section.label} <span>{section.count}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <button className="primary-button new-product-button" onClick={startNewCatalog} type="button">
-                      <Plus size={17} strokeWidth={2.4} />
-                      Nuevo catalogo
-                    </button>
-                  </div>
-
-                  {saleMessage && activeView === 'Productos' && <p className="sale-message list-message">{saleMessage}</p>}
-
-                  <div className="catalogs-grid">
-                    <form
-                      className="product-form catalog-form"
-                      onSubmit={(event) => {
-                        event.preventDefault()
-                        void saveCatalog()
-                      }}
-                    >
-                      <div className="form-title">
-                        <strong>{catalogForm.id ? 'Editar catalogo' : 'Nuevo catalogo'}</strong>
-                        <span>{catalogType === 'categories' ? 'Categoria' : catalogType === 'brands' ? 'Marca' : 'Unidad'}</span>
-                      </div>
-                      <label>
-                        <span>Nombre</span>
-                        <input
-                          onChange={(event) => setCatalogForm((form) => ({ ...form, name: event.target.value }))}
-                          required
-                          value={catalogForm.name}
-                        />
-                      </label>
-                      {catalogType === 'units' ? (
-                        <label>
-                          <span>Abreviatura</span>
-                          <input
-                            onChange={(event) => setCatalogForm((form) => ({ ...form, abbreviation: event.target.value }))}
-                            required
-                            value={catalogForm.abbreviation}
-                          />
-                        </label>
-                      ) : null}
-                      <div className="form-toggles">
-                        <label>
-                          <input
-                            checked={catalogForm.active}
-                            onChange={(event) => setCatalogForm((form) => ({ ...form, active: event.target.checked }))}
-                            type="checkbox"
-                          />
-                          <span>Activo</span>
-                        </label>
-                      </div>
-                      <div className="actions-row form-actions">
-                        <button className="ghost-button" onClick={startNewCatalog} type="button">Limpiar</button>
-                        <button className="primary-button" disabled={isSavingCatalog} type="submit">
-                          {isSavingCatalog ? 'Guardando...' : 'Guardar'}
-                        </button>
-                      </div>
-                    </form>
-
-                    <div className="product-card-list">
-                      {visibleCatalogs.map((option) => (
-                        <article className="product-list-card catalog-list-card" key={option.id}>
-                          <div className="product-main">
-                            <span>{catalogType === 'units' ? option.abbreviation || 'unidad' : catalogType === 'brands' ? 'marca' : 'categoria'}</span>
-                            <strong>{option.name}</strong>
-                            <small>{option.active ? 'Activo' : 'Inactivo'}</small>
-                          </div>
-                          <div className="product-facts">
-                            <b>{catalogType === 'units' ? option.abbreviation || '-' : '-'}</b>
-                            <small>{option.active ? 'Disponible' : 'Oculto'}</small>
-                          </div>
-                          <div className="row-actions">
-                            <button onClick={() => editCatalog(option)} type="button">
-                              <Pencil size={16} strokeWidth={2.3} />
-                              <span>Editar</span>
-                            </button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                </div>
               ) : (
                 <div className="catalogs-layout">
                   {saleMessage && activeView === 'Productos' && <p className="sale-message list-message">{saleMessage}</p>}
@@ -3158,6 +3600,113 @@ function App() {
           </section>
         ) : null}
 
+        {activeView === 'Catalogos' ? (
+          <section className="module-view">
+            <article className="module-card wide-card">
+              <div className="catalogs-layout">
+                <div className="products-command catalogs-command">
+                  <div className="filter-chips" aria-label="Tipos de catalogo">
+                    {[
+                      { key: 'categories', label: 'Categorias', count: catalogs.categories.length },
+                      { key: 'brands', label: 'Marcas', count: catalogs.brands.length },
+                      { key: 'units', label: 'Unidades', count: catalogs.units.length },
+                    ].map((section) => (
+                      <button
+                        className={catalogType === section.key ? 'active' : ''}
+                        key={section.key}
+                        onClick={() => {
+                          setCatalogType(section.key as CatalogSection)
+                          setCatalogForm(emptyCatalogForm)
+                        }}
+                        type="button"
+                      >
+                        {section.label} <span>{section.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button className="primary-button new-product-button" onClick={startNewCatalog} type="button">
+                    <Plus size={17} strokeWidth={2.4} />
+                    Nuevo catalogo
+                  </button>
+                </div>
+
+                {saleMessage && activeView === 'Catalogos' && <p className="sale-message list-message">{saleMessage}</p>}
+
+                <div className="catalogs-grid">
+                  <form
+                    className="product-form catalog-form"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void saveCatalog()
+                    }}
+                  >
+                    <div className="form-title">
+                      <strong>{catalogForm.id ? 'Editar catalogo' : 'Nuevo catalogo'}</strong>
+                      <span>{catalogType === 'categories' ? 'Categoria' : catalogType === 'brands' ? 'Marca' : 'Unidad'}</span>
+                    </div>
+                    <label>
+                      <span>Nombre</span>
+                      <input
+                        onChange={(event) => setCatalogForm((form) => ({ ...form, name: event.target.value }))}
+                        required
+                        value={catalogForm.name}
+                      />
+                    </label>
+                    {catalogType === 'units' ? (
+                      <label>
+                        <span>Abreviatura</span>
+                        <input
+                          onChange={(event) => setCatalogForm((form) => ({ ...form, abbreviation: event.target.value }))}
+                          required
+                          value={catalogForm.abbreviation}
+                        />
+                      </label>
+                    ) : null}
+                    <div className="form-toggles">
+                      <label>
+                        <input
+                          checked={catalogForm.active}
+                          onChange={(event) => setCatalogForm((form) => ({ ...form, active: event.target.checked }))}
+                          type="checkbox"
+                        />
+                        <span>Activo</span>
+                      </label>
+                    </div>
+                    <div className="actions-row form-actions">
+                      <button className="ghost-button" onClick={startNewCatalog} type="button">Limpiar</button>
+                      <button className="primary-button" disabled={isSavingCatalog} type="submit">
+                        {isSavingCatalog ? 'Guardando...' : 'Guardar'}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="product-card-list">
+                    {visibleCatalogs.map((option) => (
+                      <article className="product-list-card catalog-list-card" key={option.id}>
+                        <div className="product-main">
+                          <span>{catalogType === 'units' ? option.abbreviation || 'unidad' : catalogType === 'brands' ? 'marca' : 'categoria'}</span>
+                          <strong>{option.name}</strong>
+                          <small>{option.active ? 'Activo' : 'Inactivo'}</small>
+                        </div>
+                        <div className="product-facts">
+                          <b>{catalogType === 'units' ? option.abbreviation || '-' : '-'}</b>
+                          <small>{option.active ? 'Disponible' : 'Oculto'}</small>
+                        </div>
+                        <div className="row-actions">
+                          <button onClick={() => editCatalog(option)} type="button">
+                            <Pencil size={16} strokeWidth={2.3} />
+                            <span>Editar</span>
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </article>
+          </section>
+        ) : null}
+
         {activeView === 'Inventario' ? (
           <section className="module-view">
             <article className="module-card wide-card">
@@ -3165,7 +3714,7 @@ function App() {
                 <div className="filter-chips inventory-tabs" aria-label="Vistas de inventario">
                   {[
                     { key: 'stock', label: 'Stock', count: inventoryCounts.stock },
-                    { key: 'movement', label: 'Movimiento', count: null },
+                    { key: 'movement', label: hasSellableStock ? 'Ajuste' : 'Carga inicial', count: null },
                     { key: 'history', label: 'Historial', count: inventoryCounts.movements },
                   ].map((tab) => (
                     <button
@@ -3180,7 +3729,7 @@ function App() {
                 </div>
                 <button className="primary-button new-product-button" onClick={() => startInventoryMovement()} type="button">
                   <Plus size={17} strokeWidth={2.4} />
-                  Registrar movimiento
+                  {hasSellableStock ? 'Registrar ajuste' : 'Registrar carga inicial'}
                 </button>
               </div>
 
@@ -3221,7 +3770,7 @@ function App() {
                   }}
                 >
                   <div className="form-title">
-                    <strong>Registrar movimiento</strong>
+                    <strong>{hasSellableStock ? 'Registrar ajuste de inventario' : 'Registrar carga inicial'}</strong>
                     <span>{branchName}</span>
                   </div>
 
@@ -3246,7 +3795,7 @@ function App() {
                         value={inventoryForm.movement_type}
                       >
                         <option value="initial_stock">Stock inicial</option>
-                        <option value="purchase_receipt">Entrada</option>
+                        <option value="purchase_receipt">Entrada extraordinaria</option>
                         <option value="positive_adjustment">Ajuste positivo</option>
                         <option value="negative_adjustment">Ajuste negativo</option>
                         <option value="waste">Merma</option>
@@ -3316,7 +3865,148 @@ function App() {
           </section>
         ) : null}
 
-        {activeView === 'Clientes' ? (
+        {activeView === 'Configuracion' ? (
+          <section className="module-view">
+            <article className="module-card wide-card">
+              <div className="section-header">
+                <div>
+                  <p className="eyebrow">Configuracion inicial</p>
+                  <h2>Empresa y sucursal</h2>
+                </div>
+              </div>
+
+              <form
+                className="product-form settings-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void saveSettings()
+                }}
+              >
+                <div className="form-title">
+                  <strong>Datos minimos para operar</strong>
+                  <span>{onboardingLocked ? 'Pendiente' : 'Listo para operar'}</span>
+                </div>
+                {onboardingLocked ? (
+                  <div className="setup-warning" role="status">
+                    <strong>Completa esta configuracion operativa antes de vender.</strong>
+                    <span>Paso actual: {firstPendingStep?.label || 'Configuracion pendiente'}</span>
+                  </div>
+                ) : null}
+
+                <div className="onboarding-checklist" aria-label="Checklist de arranque">
+                  {onboardingSteps.map((step) => (
+                    <article className="onboarding-step" key={step.key}>
+                      <div>
+                        <strong>{step.label}</strong>
+                        <small>{step.complete ? 'Listo' : 'Pendiente'}</small>
+                      </div>
+                      {step.complete ? (
+                        <span className="status success">Listo</span>
+                      ) : (
+                        <button className="secondary-button" onClick={() => goToOnboardingTarget(step)} type="button">
+                          {step.actionLabel}
+                        </button>
+                      )}
+                    </article>
+                  ))}
+                </div>
+
+                <div className="form-grid-2">
+                  <label>
+                    <span>Nombre comercial</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, commercial_name: event.target.value }))}
+                      required
+                      value={settingsForm.commercial_name}
+                    />
+                  </label>
+                  <label>
+                    <span>Razon social</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, legal_name: event.target.value }))}
+                      required
+                      value={settingsForm.legal_name}
+                    />
+                  </label>
+                </div>
+
+                <div className="form-grid-2">
+                  <label>
+                    <span>RFC</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, rfc: event.target.value }))}
+                      required
+                      value={settingsForm.rfc}
+                    />
+                  </label>
+                  <label>
+                    <span>Contacto principal</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, primary_contact_name: event.target.value }))}
+                      required
+                      value={settingsForm.primary_contact_name}
+                    />
+                  </label>
+                </div>
+
+                <div className="form-grid-2">
+                  <label>
+                    <span>Telefono</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, phone: event.target.value }))}
+                      required
+                      value={settingsForm.phone}
+                    />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, email: event.target.value }))}
+                      required
+                      type="email"
+                      value={settingsForm.email}
+                    />
+                  </label>
+                </div>
+
+                <div className="form-grid-2">
+                  <label>
+                    <span>WhatsApp</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, whatsapp: event.target.value }))}
+                      value={settingsForm.whatsapp}
+                    />
+                  </label>
+                  <label>
+                    <span>Nombre de sucursal</span>
+                    <input
+                      onChange={(event) => setSettingsForm((form) => ({ ...form, branch_name: event.target.value }))}
+                      required
+                      value={settingsForm.branch_name}
+                    />
+                  </label>
+                </div>
+
+                <label>
+                  <span>Direccion de sucursal</span>
+                  <input
+                    onChange={(event) => setSettingsForm((form) => ({ ...form, branch_address: event.target.value }))}
+                    value={settingsForm.branch_address}
+                  />
+                </label>
+
+                <div className="actions-row form-actions">
+                  <button className="primary-button" disabled={isSavingSettings} type="submit">
+                    {isSavingSettings ? 'Guardando...' : 'Guardar configuracion'}
+                  </button>
+                </div>
+                {saleMessage && activeView === 'Configuracion' ? <p className="sale-message form-message">{saleMessage}</p> : null}
+              </form>
+            </article>
+          </section>
+        ) : null}
+
+        {!onboardingLocked && activeView === 'Clientes' ? (
           <section className="module-view">
             <article className="module-card wide-card">
               <div className="products-command customers-command">
@@ -3756,7 +4446,12 @@ function App() {
                   <h2>Compras</h2>
                 </div>
                 {purchaseMode === 'list' ? (
-                  <button className="primary-button new-product-button" onClick={startNewPurchase} type="button">
+                  <button
+                    className="primary-button new-product-button"
+                    disabled={!hasSuppliers || !hasProducts}
+                    onClick={startNewPurchase}
+                    type="button"
+                  >
                     <Plus size={17} strokeWidth={2.4} />
                     Nueva compra
                   </button>
@@ -3770,6 +4465,18 @@ function App() {
               {purchaseMode === 'list' ? (
                 <div className="product-list-view">
                   {saleMessage && activeView === 'Compras' && <p className="sale-message list-message">{saleMessage}</p>}
+                  {!hasSuppliers ? (
+                    <div className="setup-warning" role="status">
+                      <strong>Antes de comprar, crea un proveedor.</strong>
+                      <span>La compra es la entrada normal de stock. Si solo vas a arrancar, usa carga inicial desde Inventario.</span>
+                    </div>
+                  ) : null}
+                  {hasSuppliers && !hasProducts ? (
+                    <div className="setup-warning" role="status">
+                      <strong>Primero necesitas al menos un producto.</strong>
+                      <span>La compra recibe productos existentes y actualiza su costo y stock.</span>
+                    </div>
+                  ) : null}
                   <div className="product-list-meta">
                     <span>{purchases.length} compras registradas</span>
                   </div>
@@ -3785,12 +4492,18 @@ function App() {
                         </div>
                         <div className="product-facts">
                           <b>{formatMoney(purchase.total_cents)}</b>
-                          <small>{purchase.invoice_reference || 'Sin factura'}</small>
+                          <small>{purchase.status === 'cancelled' ? 'Cancelada' : purchase.invoice_reference || 'Sin factura'}</small>
                         </div>
                         <div className="row-actions">
-                          <button disabled type="button">
-                            <span>Recibida</span>
-                          </button>
+                          {purchase.status === 'cancelled' ? (
+                            <button disabled type="button">
+                              <span>Cancelada</span>
+                            </button>
+                          ) : (
+                            <button aria-label={`Anular ${purchase.folio}`} onClick={() => startCancelPurchase(purchase)} type="button">
+                              <span>Anular</span>
+                            </button>
+                          )}
                         </div>
                       </article>
                     ))}
@@ -3801,6 +4514,78 @@ function App() {
                       </div>
                     ) : null}
                   </div>
+                  {selectedPurchase ? (
+                    <form
+                      className="product-form sale-cancel-form"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void cancelSelectedPurchase()
+                      }}
+                    >
+                      <div className="form-title">
+                        <strong>Anular compra {selectedPurchase.folio}</strong>
+                        <span>
+                          {selectedPurchase.status === 'cancelled'
+                            ? 'Ya fue cancelada'
+                            : 'Solo se permite si el stock actual alcanza para revertirla'}
+                        </span>
+                      </div>
+                      <div className="checkout-summary ticket-summary">
+                        <div><span>Proveedor</span><strong>{selectedPurchase.supplier.commercial_name}</strong></div>
+                        <div><span>Total</span><strong>{formatMoney(selectedPurchase.total_cents)}</strong></div>
+                        <div><span>Fecha</span><strong>{new Date(selectedPurchase.purchased_at).toLocaleString('es-MX')}</strong></div>
+                      </div>
+                      {selectedPurchase.status === 'cancelled' ? (
+                        <div className="checkout-summary ticket-summary">
+                          <div><span>Cancelada</span><strong>{selectedPurchase.cancelled_at ? new Date(selectedPurchase.cancelled_at).toLocaleString('es-MX') : 'Sin fecha'}</strong></div>
+                          <div><span>Por</span><strong>{selectedPurchase.cancelled_by?.name || 'Sin usuario'}</strong></div>
+                          <div><span>Motivo</span><strong>{selectedPurchase.cancellation_reason || 'Sin motivo'}</strong></div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="movement-list">
+                            {selectedPurchase.items.map((item) => (
+                              <article className="movement-row" key={item.id}>
+                                <div>
+                                  <span>{item.product.sku}</span>
+                                  <strong>{item.product.name}</strong>
+                                  <small>{item.quantity} {item.unit}</small>
+                                </div>
+                                <b className="movement-positive">{formatMoney(item.total_cents)}</b>
+                                <small />
+                              </article>
+                            ))}
+                          </div>
+                          <label>
+                            <span>Motivo de cancelacion</span>
+                            <input
+                              onChange={(event) => setPurchaseCancelReason(event.target.value)}
+                              placeholder="Ej. error de captura, compra duplicada"
+                              required
+                              value={purchaseCancelReason}
+                            />
+                          </label>
+                        </>
+                      )}
+                      <div className="actions-row form-actions">
+                        <button
+                          className="ghost-button"
+                          onClick={() => {
+                            setSelectedPurchase(null)
+                            setPurchaseCancelReason('')
+                          }}
+                          type="button"
+                        >
+                          Cerrar
+                        </button>
+                        {selectedPurchase.status !== 'cancelled' ? (
+                          <button className="primary-button" disabled={isCancellingPurchase} type="submit">
+                            {isCancellingPurchase ? 'Anulando...' : 'Confirmar anulacion'}
+                          </button>
+                        ) : null}
+                      </div>
+                    </form>
+                  ) : null}
                 </div>
               ) : (
                 <form
@@ -4166,6 +4951,7 @@ function App() {
             {navItems.map(({ label, icon: Icon }) => (
               <button
                 className={label === activeView ? 'active' : ''}
+                disabled={onboardingLocked && !onboardingAllowedViews.has(label)}
                 key={label}
                 onClick={() => {
                   setMobileMenuOpen(false)
@@ -4174,7 +4960,7 @@ function App() {
                 type="button"
               >
                 <Icon size={18} strokeWidth={2.2} />
-                {label}
+                {renderNavLabel(label)}
               </button>
             ))}
           </nav>
@@ -4182,9 +4968,10 @@ function App() {
       </div>
 
       <nav className="mobile-nav" aria-label="Navegacion movil">
-        {navItems.slice(0, 5).map(({ label, icon: Icon }) => (
+        {mobilePrimaryNavItems.map(({ label, icon: Icon }) => (
           <button
             className={label === activeView ? 'active' : ''}
+            disabled={onboardingLocked && !onboardingAllowedViews.has(label)}
             key={label}
             onClick={() => goToView(label)}
             type="button"
@@ -4193,6 +4980,14 @@ function App() {
             <span>{label}</span>
           </button>
         ))}
+        <button
+          className={mobileMenuOpen ? 'active' : ''}
+          onClick={() => setMobileMenuOpen(true)}
+          type="button"
+        >
+          <MoreHorizontal size={18} strokeWidth={2.3} />
+          <span>Mas</span>
+        </button>
       </nav>
     </div>
   )

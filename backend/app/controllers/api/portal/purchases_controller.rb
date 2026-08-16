@@ -29,6 +29,23 @@ class Api::Portal::PurchasesController < ApplicationController
     render json: { errors: [ error.message ] }, status: :unprocessable_entity
   end
 
+  def cancel
+    purchase = business.purchases.includes(:supplier, :branch, :created_by, :cancelled_by, purchase_items: %i[product unit]).find(params[:id])
+    cancelled_by = business.users.find(cancel_params[:cancelled_by_id])
+
+    cancelled_purchase = Purchases::Canceller.call(
+      purchase: purchase,
+      cancelled_by: cancelled_by,
+      reason: cancel_params[:cancellation_reason]
+    )
+
+    render json: purchase_json(cancelled_purchase.reload)
+  rescue ActiveRecord::RecordInvalid => error
+    render json: { errors: error.record.errors.full_messages }, status: :unprocessable_entity
+  rescue ActiveRecord::RecordNotFound, ArgumentError => error
+    render json: { errors: [ error.message ] }, status: :unprocessable_entity
+  end
+
   private
 
   def business
@@ -47,12 +64,18 @@ class Api::Portal::PurchasesController < ApplicationController
     )
   end
 
+  def cancel_params
+    params.require(:purchase).permit(:cancelled_by_id, :cancellation_reason)
+  end
+
   def purchase_json(purchase)
     {
       id: purchase.id,
       folio: purchase.folio,
       status: purchase.status,
       purchased_at: purchase.purchased_at.iso8601,
+      cancelled_at: purchase.cancelled_at&.iso8601,
+      cancellation_reason: purchase.cancellation_reason,
       invoice_reference: purchase.invoice_reference,
       notes: purchase.notes,
       total_cents: purchase.total_cents,
@@ -68,6 +91,10 @@ class Api::Portal::PurchasesController < ApplicationController
       created_by: {
         id: purchase.created_by.id,
         name: purchase.created_by.name
+      },
+      cancelled_by: purchase.cancelled_by && {
+        id: purchase.cancelled_by.id,
+        name: purchase.cancelled_by.name
       },
       items: purchase.purchase_items.map do |item|
         {
