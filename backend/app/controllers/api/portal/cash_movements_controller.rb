@@ -1,16 +1,19 @@
 class Api::Portal::CashMovementsController < ApplicationController
+  before_action :require_portal_business!
+  before_action :require_active_portal_business!, only: :create
+  before_action -> { require_permission!("create_cash_movement") }, only: :create
+
   def index
-    business = Business.find(params[:business_id])
-    movements = business.cash_movements.includes(:branch, :cash_register_session, :created_by).recent.limit(100)
+    movements = business.cash_movements.where(branch_id: accessible_portal_branches.select(:id)).includes(:branch, :cash_register_session, :created_by).recent.limit(100)
     movements = movements.where(cash_register_session_id: params[:cash_register_session_id]) if params[:cash_register_session_id].present?
 
     render json: movements.map { |movement| movement_json(movement) }
   end
 
   def create
-    business = Business.find(params[:business_id])
     session = business.cash_register_sessions.open.find(cash_movement_params[:cash_register_session_id])
-    created_by = cash_movement_params[:created_by_id].present? ? business.users.find(cash_movement_params[:created_by_id]) : nil
+    ensure_portal_branch_access!(session.branch)
+    created_by = portal_actor
 
     movement = ::Cash::MovementRecorder.call(
       cash_register_session: session,
@@ -25,9 +28,15 @@ class Api::Portal::CashMovementsController < ApplicationController
     render json: movement_json(movement), status: :created
   rescue ActiveRecord::RecordInvalid => error
     render json: { errors: error.record.errors.full_messages.presence || [ "No se pudo registrar movimiento de caja" ] }, status: :unprocessable_entity
+  rescue ActiveRecord::RecordNotFound, ArgumentError => error
+    render json: { errors: [ error.message ] }, status: :unprocessable_entity
   end
 
   private
+
+  def business
+    portal_business
+  end
 
   def cash_movement_params
     params.require(:cash_movement).permit(

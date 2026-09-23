@@ -10,10 +10,40 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_16_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_20_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
+
+  create_table "audit_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "business_id", null: false
+    t.uuid "actor_id"
+    t.string "event_type", null: false
+    t.string "auditable_type", null: false
+    t.uuid "auditable_id", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.string "ip_address"
+    t.string "user_agent"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["actor_id"], name: "index_audit_events_on_actor_id"
+    t.index ["auditable_type", "auditable_id"], name: "index_audit_events_on_auditable_type_and_auditable_id"
+    t.index ["business_id", "created_at"], name: "index_audit_events_on_business_id_and_created_at"
+    t.index ["business_id", "event_type"], name: "index_audit_events_on_business_id_and_event_type"
+    t.index ["business_id"], name: "index_audit_events_on_business_id"
+  end
+
+  create_table "branch_assignments", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "membership_id", null: false
+    t.uuid "branch_id", null: false
+    t.string "role", null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["branch_id"], name: "index_branch_assignments_on_branch_id"
+    t.index ["membership_id", "branch_id"], name: "index_branch_assignments_on_membership_id_and_branch_id", unique: true
+    t.index ["membership_id"], name: "index_branch_assignments_on_membership_id"
+  end
 
   create_table "branches", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "business_id", null: false
@@ -25,6 +55,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_16_120000) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "operational_day_start_minute", default: 0, null: false
     t.index ["business_id", "code"], name: "index_branches_on_business_id_and_code", unique: true
     t.index ["business_id"], name: "index_branches_on_business_id"
   end
@@ -94,11 +125,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_16_120000) do
     t.text "closing_notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "pending_close_at"
+    t.boolean "forced_closed", default: false, null: false
+    t.text "force_close_reason"
     t.index ["branch_id"], name: "index_cash_register_sessions_on_branch_id"
     t.index ["business_id", "cash_register_id", "status"], name: "idx_on_business_id_cash_register_id_status_17bd1ee143"
     t.index ["business_id"], name: "index_cash_register_sessions_on_business_id"
+    t.index ["cash_register_id"], name: "index_active_cash_register_session", unique: true, where: "((status)::text = ANY ((ARRAY['open'::character varying, 'pending_close'::character varying])::text[]))"
     t.index ["cash_register_id"], name: "index_cash_register_sessions_on_cash_register_id"
-    t.index ["cash_register_id"], name: "index_open_cash_register_session", unique: true, where: "((status)::text = 'open'::text)"
     t.index ["closed_by_id"], name: "index_cash_register_sessions_on_closed_by_id"
     t.index ["opened_by_id"], name: "index_cash_register_sessions_on_opened_by_id"
   end
@@ -414,6 +448,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_16_120000) do
     t.index ["email"], name: "index_users_on_email", unique: true
   end
 
+  add_foreign_key "audit_events", "businesses"
+  add_foreign_key "audit_events", "users", column: "actor_id"
+  add_foreign_key "branch_assignments", "branches"
+  add_foreign_key "branch_assignments", "memberships"
   add_foreign_key "branches", "businesses"
   add_foreign_key "brands", "businesses"
   add_foreign_key "cash_movements", "branches"

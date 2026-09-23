@@ -16,6 +16,7 @@ module Cash
 
     def call
       ActiveRecord::Base.transaction do
+        @session.mark_pending_close_if_expired!
         raise ActiveRecord::RecordInvalid, @session unless @session.open?
 
         movement = CashMovement.create!(

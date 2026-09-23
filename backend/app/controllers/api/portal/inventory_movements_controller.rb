@@ -1,8 +1,12 @@
 class Api::Portal::InventoryMovementsController < ApplicationController
+  before_action :require_portal_business!
+  before_action :require_active_portal_business!, only: :create
+  before_action -> { require_permission!("adjust_inventory") }, only: :create
+
   def index
-    business = Business.find(params[:business_id])
     movements = business.inventory_movements
       .includes(:branch, :product, :unit, :created_by)
+      .where(branch_id: accessible_portal_branches.select(:id))
       .recent
       .limit(100)
     movements = movements.where(branch_id: params[:branch_id]) if params[:branch_id].present?
@@ -12,11 +16,10 @@ class Api::Portal::InventoryMovementsController < ApplicationController
   end
 
   def create
-    business = Business.find(params[:business_id])
     product = business.products.find(inventory_movement_params[:product_id])
-    branch = business.branches.find(inventory_movement_params[:branch_id])
+    branch = portal_branch(inventory_movement_params[:branch_id])
     unit = inventory_movement_params[:unit_id].present? ? business.units.find(inventory_movement_params[:unit_id]) : product.base_unit
-    created_by = inventory_movement_params[:created_by_id].present? ? business.users.find(inventory_movement_params[:created_by_id]) : nil
+    created_by = portal_actor
 
     movement = ::Inventory::MovementRecorder.call(
       business:,
@@ -38,6 +41,10 @@ class Api::Portal::InventoryMovementsController < ApplicationController
   end
 
   private
+
+  def business
+    portal_business
+  end
 
   def inventory_movement_params
     params.require(:inventory_movement).permit(

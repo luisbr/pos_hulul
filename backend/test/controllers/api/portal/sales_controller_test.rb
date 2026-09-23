@@ -1,6 +1,8 @@
 require "test_helper"
 
 class Api::Portal::SalesControllerTest < ActionDispatch::IntegrationTest
+  include ActiveSupport::Testing::TimeHelpers
+
   setup do
     @business = Business.create!(
       commercial_name: "Ferreteria El Tornillo",
@@ -29,7 +31,8 @@ class Api::Portal::SalesControllerTest < ActionDispatch::IntegrationTest
       minimum_stock: 2
     )
     @cashier = User.create!(name: "Ana Martinez", email: "ana-sales@example.test", password: "password123")
-    Membership.create!(business: @business, user: @cashier, role: "cashier")
+    Membership.create!(business: @business, user: @cashier, role: "manager")
+    sign_in_as @cashier
     @customer = Customer.create!(business: @business, customer_type: "person", commercial_name: "Publico en general", public_customer: true)
 
     Inventory::MovementRecorder.call(
@@ -102,6 +105,21 @@ class Api::Portal::SalesControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     assert_includes response.parsed_body["errors"].join(" "), "caja"
+  end
+
+  test "marks stale session pending close and rejects sale" do
+    @branch.update!(operational_day_start_minute: 360)
+    @session.update!(opened_at: Time.zone.local(2026, 8, 27, 10, 0, 0))
+
+    travel_to Time.zone.local(2026, 8, 28, 7, 0, 0) do
+      assert_no_difference -> { Sale.count } do
+        post api_portal_business_sales_url(@business), params: sale_params(idempotency_key: "stale-001")
+      end
+    end
+
+    assert_response :unprocessable_entity
+    assert_equal "pending_close", @session.reload.status
+    assert_includes response.parsed_body["errors"].join(" "), "pendiente de cierre"
   end
 
   test "rejects sale when stock is insufficient" do
@@ -189,6 +207,25 @@ class Api::Portal::SalesControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     assert_includes response.parsed_body["errors"].join(" "), "Abre una caja"
+  end
+
+  test "rejects sale cancellation without permission" do
+    post api_portal_business_sales_url(@business), params: sale_params(idempotency_key: "cancel-forbidden-001")
+    sale_id = response.parsed_body["id"]
+
+    cashier = User.create!(name: "Cajero", email: "cajero-cancel@example.test", password: "password123")
+    Membership.create!(business: @business, user: cashier, role: "cashier")
+    sign_in_as cashier
+
+    post cancel_api_portal_business_sale_url(@business, sale_id), params: {
+      sale: {
+        cash_register_session_id: @session.id,
+        cancellation_reason: "Sin permiso"
+      }
+    }
+
+    assert_response :forbidden
+    assert_includes response.parsed_body["errors"].join(" "), "No tienes permiso"
   end
 
   private

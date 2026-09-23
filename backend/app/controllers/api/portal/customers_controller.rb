@@ -1,4 +1,8 @@
 class Api::Portal::CustomersController < ApplicationController
+  before_action :require_portal_business!
+  before_action :require_active_portal_business!, only: %i[create update]
+  before_action -> { require_permission!("manage_customers") }, only: %i[create update]
+
   def index
     customers = business.customers.search(params[:q]).ordered.limit(100)
     customers = customers.active if ActiveModel::Type::Boolean.new.cast(params[:active_only])
@@ -12,6 +16,15 @@ class Api::Portal::CustomersController < ApplicationController
 
   def create
     customer = business.customers.create!(customer_params)
+    record_audit_event!(
+      business: business,
+      event_type: "customer.created",
+      auditable: customer,
+      metadata: {
+        commercial_name: customer.commercial_name,
+        rfc: customer.rfc
+      }
+    )
 
     render json: customer_json(customer), status: :created
   rescue ActiveRecord::RecordInvalid => error
@@ -21,6 +34,15 @@ class Api::Portal::CustomersController < ApplicationController
   def update
     customer = business.customers.find(params[:id])
     customer.update!(customer_params)
+    record_audit_event!(
+      business: business,
+      event_type: "customer.updated",
+      auditable: customer,
+      metadata: {
+        commercial_name: customer.commercial_name,
+        changed_fields: customer.previous_changes.keys - %w[updated_at]
+      }
+    )
 
     render json: customer_json(customer.reload)
   rescue ActiveRecord::RecordInvalid => error
@@ -30,7 +52,7 @@ class Api::Portal::CustomersController < ApplicationController
   private
 
   def business
-    @business ||= Business.find(params[:business_id])
+    portal_business
   end
 
   def customer_params

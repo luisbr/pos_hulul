@@ -10,6 +10,7 @@ class User < ApplicationRecord
   has_many :cancelled_purchases, class_name: "Purchase", foreign_key: :cancelled_by_id, dependent: :nullify, inverse_of: :cancelled_by
   has_many :payments, foreign_key: :created_by_id, dependent: :restrict_with_exception, inverse_of: :created_by
   has_many :cash_movements, foreign_key: :created_by_id, dependent: :nullify, inverse_of: :created_by
+  has_many :audit_events, foreign_key: :actor_id, dependent: :nullify, inverse_of: :actor
 
   normalizes :email, with: ->(email) { email.strip.downcase }
 

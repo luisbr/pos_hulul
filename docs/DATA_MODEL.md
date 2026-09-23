@@ -46,6 +46,7 @@ Campos:
 - `address`
 - `timezone`
 - `currency`
+- `operational_day_start_minute`
 - `active`
 
 ### users
@@ -80,6 +81,13 @@ Roles iniciales:
 - `warehouse`
 - `hulul_admin`
 - `hulul_support`
+
+Reglas:
+
+- Un usuario puede pertenecer a multiples negocios.
+- El rol se evalua por membresia, no de forma global.
+- Las operaciones del portal deben validar membresia activa contra el `business_id` solicitado.
+- En acciones operativas el usuario responsable debe salir de la sesion autenticada cuando exista token.
 
 ## Catalogos y productos
 
@@ -206,6 +214,15 @@ Tipos:
 - `waste`
 - `sale_cancellation`
 
+Pendiente recomendado para grupos de empresas:
+
+- `intercompany_transfer_out`
+- `intercompany_transfer_in`
+- `inventory_loan_out`
+- `inventory_loan_in`
+
+Estos tipos deben ligarse por una entidad puente futura para controlar material prestado entre empresas del mismo dueno sin mezclar existencias.
+
 ## Caja y ventas
 
 ### cash_registers
@@ -230,12 +247,15 @@ Tipos:
 - `closed_by_id`
 - `opened_at`
 - `closed_at`
+- `pending_close_at`
 - `opening_amount_cents`
 - `expected_cash_cents`
 - `counted_cash_cents`
 - `difference_cents`
 - `status`
 - `closing_notes`
+- `forced_closed`
+- `force_close_reason`
 
 ### sales
 
@@ -472,6 +492,21 @@ Estados:
 - `raw_value`
 
 ## Sync futuro
+
+### audit_events
+
+Bitacora por empresa para cambios administrativos y acciones sensibles.
+
+- `id`
+- `business_id`
+- `actor_id`
+- `event_type`
+- `auditable_type`
+- `auditable_id`
+- `metadata`
+- `ip_address`
+- `user_agent`
+- `created_at`
 
 ### sync_events
 

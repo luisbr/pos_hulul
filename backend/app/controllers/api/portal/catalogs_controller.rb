@@ -1,7 +1,9 @@
 class Api::Portal::CatalogsController < ApplicationController
-  def index
-    business = Business.find(params[:business_id])
+  before_action :require_portal_business!
+  before_action :require_active_portal_business!, only: %i[create update]
+  before_action -> { require_permission!("manage_catalogs") }, only: %i[create update]
 
+  def index
     render json: {
       categories: business.product_categories.order(:name).map do |category|
         {
@@ -32,6 +34,15 @@ class Api::Portal::CatalogsController < ApplicationController
   def create
     record = catalog_model.new(catalog_params.merge(business: business))
     record.save!
+    record_audit_event!(
+      business: business,
+      event_type: "catalog.created",
+      auditable: record,
+      metadata: {
+        catalog_type: params[:catalog_type],
+        name: record.name
+      }
+    )
 
     render json: catalog_json(record), status: :created
   rescue ActiveRecord::RecordInvalid => error
@@ -43,6 +54,16 @@ class Api::Portal::CatalogsController < ApplicationController
   def update
     record = catalog_scope.find(params[:id])
     record.update!(catalog_params)
+    record_audit_event!(
+      business: business,
+      event_type: "catalog.updated",
+      auditable: record,
+      metadata: {
+        catalog_type: params[:catalog_type],
+        name: record.name,
+        changed_fields: record.previous_changes.keys - %w[updated_at]
+      }
+    )
 
     render json: catalog_json(record)
   rescue ActiveRecord::RecordInvalid => error
@@ -54,7 +75,7 @@ class Api::Portal::CatalogsController < ApplicationController
   private
 
   def business
-    @business ||= Business.find(params[:business_id])
+    portal_business
   end
 
   def catalog_scope

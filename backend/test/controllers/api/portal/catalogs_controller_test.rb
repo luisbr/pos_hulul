@@ -7,6 +7,9 @@ class Api::Portal::CatalogsControllerTest < ActionDispatch::IntegrationTest
       status: "active",
       license_status: "trial"
     )
+    @user = User.create!(name: "Ana Martinez", email: "ana-catalogs@example.test", password: "password123")
+    Membership.create!(business: @business, user: @user, role: "owner")
+    sign_in_as @user
   end
 
   test "lists catalogs by business" do

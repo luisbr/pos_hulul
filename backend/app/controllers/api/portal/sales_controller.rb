@@ -1,20 +1,28 @@
 class Api::Portal::SalesController < ApplicationController
+  before_action :require_portal_business!
+  before_action :require_active_portal_business!, only: %i[create cancel]
+  before_action -> { require_permission!("create_sale") }, only: :create
+  before_action -> { require_permission!("cancel_sale") }, only: :cancel
+
   def index
-    sales = business.sales.includes(:sale_items, :payments, :cashier, :customer).recent.limit(100)
+    sales = business.sales.where(branch_id: accessible_portal_branches.select(:id)).includes(:sale_items, :payments, :cashier, :customer).recent.limit(100)
+    sales = sales.where(branch_id: params[:branch_id]) if params[:branch_id].present?
     render json: sales.map { |sale| sale_json(sale) }
   end
 
   def show
     sale = business.sales.includes(:sale_items, :payments, :cashier, :customer).find(params[:id])
+    ensure_portal_branch_access!(sale.branch)
     render json: sale_json(sale)
   end
 
   def create
     attrs = sale_params
-    branch = business.branches.find(attrs[:branch_id])
+    branch = portal_branch(attrs[:branch_id])
     cash_register = business.cash_registers.find(attrs[:cash_register_id])
-    session = business.cash_register_sessions.open.find_by(cash_register:)
-    cashier = business.users.find(attrs[:cashier_id])
+    raise ActiveRecord::RecordNotFound unless cash_register.branch_id == branch.id
+    session = business.cash_register_sessions.active.find_by(cash_register:)
+    cashier = portal_actor
     customer = attrs[:customer_id].present? ? business.customers.find(attrs[:customer_id]) : nil
 
     sale = Sales::Checkout.call(
@@ -38,7 +46,8 @@ class Api::Portal::SalesController < ApplicationController
 
   def cancel
     sale = business.sales.includes(:payments, sale_items: %i[product unit]).find(params[:id])
-    cancelled_by = business.users.find(cancel_params[:cancelled_by_id])
+    ensure_portal_branch_access!(sale.branch)
+    cancelled_by = portal_actor
     refund_session = if cancel_params[:cash_register_session_id].present?
       business.cash_register_sessions.open.find(cancel_params[:cash_register_session_id])
     end
@@ -48,6 +57,15 @@ class Api::Portal::SalesController < ApplicationController
       cancelled_by: cancelled_by,
       reason: cancel_params[:cancellation_reason],
       refund_session: refund_session
+    )
+    record_audit_event!(
+      business: business,
+      event_type: "sale.cancelled",
+      auditable: cancelled_sale,
+      metadata: {
+        folio: cancelled_sale.folio,
+        reason: cancel_params[:cancellation_reason]
+      }
     )
 
     render json: sale_json(cancelled_sale.reload)
@@ -60,7 +78,7 @@ class Api::Portal::SalesController < ApplicationController
   private
 
   def business
-    @business ||= Business.find(params[:business_id])
+    portal_business
   end
 
   def sale_params

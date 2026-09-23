@@ -14,6 +14,7 @@ module Cash
 
     def call
       ActiveRecord::Base.transaction do
+        @cash_register.current_session&.mark_pending_close_if_expired!
         raise ActiveRecord::RecordInvalid, @cash_register.current_session if @cash_register.current_session
 
         session = CashRegisterSession.create!(

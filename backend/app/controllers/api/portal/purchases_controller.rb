@@ -1,11 +1,18 @@
 class Api::Portal::PurchasesController < ApplicationController
+  before_action :require_portal_business!
+  before_action :require_active_portal_business!, only: %i[create cancel]
+  before_action -> { require_permission!("manage_purchases") }, only: :create
+  before_action -> { require_permission!("cancel_purchase") }, only: :cancel
+
   def index
-    purchases = business.purchases.includes(:supplier, :branch, :created_by, purchase_items: :product).recent.limit(100)
+    purchases = business.purchases.where(branch_id: accessible_portal_branches.select(:id)).includes(:supplier, :branch, :created_by, purchase_items: :product).recent.limit(100)
+    purchases = purchases.where(branch_id: params[:branch_id]) if params[:branch_id].present?
     render json: purchases.map { |purchase| purchase_json(purchase) }
   end
 
   def show
     purchase = business.purchases.includes(:supplier, :branch, :created_by, purchase_items: :product).find(params[:id])
+    ensure_portal_branch_access!(purchase.branch)
     render json: purchase_json(purchase)
   end
 
@@ -13,9 +20,9 @@ class Api::Portal::PurchasesController < ApplicationController
     attrs = purchase_params
     purchase = Purchases::Recorder.call(
       business: business,
-      branch: business.branches.find(attrs[:branch_id]),
+      branch: portal_branch(attrs[:branch_id]),
       supplier: business.suppliers.find(attrs[:supplier_id]),
-      created_by: business.users.find(attrs[:created_by_id]),
+      created_by: portal_actor,
       purchased_at: attrs[:purchased_at],
       invoice_reference: attrs[:invoice_reference],
       notes: attrs[:notes],
@@ -31,12 +38,22 @@ class Api::Portal::PurchasesController < ApplicationController
 
   def cancel
     purchase = business.purchases.includes(:supplier, :branch, :created_by, :cancelled_by, purchase_items: %i[product unit]).find(params[:id])
-    cancelled_by = business.users.find(cancel_params[:cancelled_by_id])
+    ensure_portal_branch_access!(purchase.branch)
+    cancelled_by = portal_actor
 
     cancelled_purchase = Purchases::Canceller.call(
       purchase: purchase,
       cancelled_by: cancelled_by,
       reason: cancel_params[:cancellation_reason]
+    )
+    record_audit_event!(
+      business: business,
+      event_type: "purchase.cancelled",
+      auditable: cancelled_purchase,
+      metadata: {
+        folio: cancelled_purchase.folio,
+        reason: cancel_params[:cancellation_reason]
+      }
     )
 
     render json: purchase_json(cancelled_purchase.reload)
@@ -49,7 +66,7 @@ class Api::Portal::PurchasesController < ApplicationController
   private
 
   def business
-    @business ||= Business.find(params[:business_id])
+    portal_business
   end
 
   def purchase_params

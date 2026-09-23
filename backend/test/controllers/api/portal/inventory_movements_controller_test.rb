@@ -37,11 +37,12 @@ class Api::Portal::InventoryMovementsControllerTest < ActionDispatch::Integratio
       email: "luis@example.test",
       password: "password123"
     )
-    Membership.create!(
+    @membership = Membership.create!(
       business: @business,
       user: @user,
       role: "warehouse"
     )
+    sign_in_as @user
   end
 
   test "creates movement and updates balance" do
@@ -96,5 +97,45 @@ class Api::Portal::InventoryMovementsControllerTest < ActionDispatch::Integratio
 
     assert_response :success
     assert_equal @product.sku, response.parsed_body.first["product"]["sku"]
+  end
+
+  test "uses the assigned branch role for a member" do
+    @membership.update!(role: "member")
+    BranchAssignment.create!(membership: @membership, branch: @branch, role: "warehouse")
+
+    assert_difference -> { InventoryMovement.count }, 1 do
+      post api_portal_business_inventory_movements_url(@business), params: {
+        inventory_movement: {
+          branch_id: @branch.id,
+          product_id: @product.id,
+          movement_type: "initial_stock",
+          quantity: "3",
+          unit_id: @unit.id,
+          reason: "Recepcion de almacen"
+        }
+      }
+    end
+
+    assert_response :created
+  end
+
+  test "rejects an action forbidden by the assigned branch role" do
+    @membership.update!(role: "member")
+    BranchAssignment.create!(membership: @membership, branch: @branch, role: "cashier")
+
+    assert_no_difference -> { InventoryMovement.count } do
+      post api_portal_business_inventory_movements_url(@business), params: {
+        inventory_movement: {
+          branch_id: @branch.id,
+          product_id: @product.id,
+          movement_type: "initial_stock",
+          quantity: "3",
+          unit_id: @unit.id,
+          reason: "Intento sin permiso"
+        }
+      }
+    end
+
+    assert_response :forbidden
   end
 end

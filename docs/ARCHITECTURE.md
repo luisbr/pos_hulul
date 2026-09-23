@@ -36,7 +36,8 @@ Responsabilidades:
 
 - Crear y editar negocios.
 - Crear sucursales.
-- Administrar estado de licencia.
+- Administrar estado operativo de empresa.
+- Preparar pagos por empresa para una etapa posterior.
 - Entrar al portal de un negocio con permisos controlados.
 - Ver estado operativo basico: ultima actividad, usuarios, ventas, eventos pendientes futuros.
 
@@ -66,6 +67,29 @@ Regla base:
 - Ninguna consulta operativa debe leer datos sin filtrar por `business_id`.
 - La separacion por negocio se valida en backend, no solo en frontend.
 - Los usuarios pueden pertenecer a uno o varios negocios mediante membresias.
+- Cada request del portal debe resolverse contra una membresia activa del usuario autenticado.
+- El backend no debe confiar en IDs de usuario enviados por frontend para acciones operativas; debe usar el usuario autenticado.
+- Si el negocio no esta `active`, el portal queda en modo consulta y las acciones operativas responden `403`.
+- El Admin Hulul requiere usuario autenticado con rol interno `hulul_admin` o `hulul_support`; solo `hulul_admin` puede cambiar estado de empresa.
+
+Pendientes para cerrar multiempresa:
+
+- Pruebas de aislamiento por modulo.
+- Pagos por empresa: monto, vencimiento, historial de cobros y suspension automatica.
+
+## Inventario entre empresas relacionadas
+
+El inventario no debe compartirse como una sola existencia global entre empresas, aunque tengan el mismo dueno. Cada empresa mantiene su propio `business_id`, sucursales, costos, ventas, caja e historial.
+
+Cuando una empresa presta material a otra, debe registrarse como una operacion formal entre negocios:
+
+- Empresa origen: salida de inventario por prestamo o transferencia.
+- Empresa destino: entrada de inventario por prestamo o transferencia.
+- Documento puente: referencia comun para ligar ambos movimientos.
+- Estado: pendiente, devuelto, liquidado o cancelado.
+- Responsable: usuario que solicita, autoriza y recibe.
+
+Esto evita que una venta de Empresa B descuente stock de Empresa A sin rastro contable. Para grupos del mismo dueno, conviene agregar una entidad futura tipo `business_groups` y operaciones `intercompany_transfers` o `inventory_loans`.
 
 ## Etapa 1: web cloud
 

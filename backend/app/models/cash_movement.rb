@@ -6,6 +6,7 @@ class CashMovement < ApplicationRecord
     cash_out
     refund
     closing_adjustment
+    forced_closure
   ].freeze
 
   belongs_to :business
@@ -22,6 +23,6 @@ class CashMovement < ApplicationRecord
   private
 
   def requires_reason?
-    %w[cash_out refund closing_adjustment].include?(movement_type)
+    %w[cash_out refund closing_adjustment forced_closure].include?(movement_type)
   end
 end

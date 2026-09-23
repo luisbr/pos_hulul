@@ -8,6 +8,9 @@ class Api::Portal::ProductsControllerTest < ActionDispatch::IntegrationTest
       status: "active",
       license_status: "trial"
     )
+    @user = User.create!(name: "Ana Martinez", email: "ana-products@example.test", password: "password123")
+    Membership.create!(business: @business, user: @user, role: "owner")
+    sign_in_as @user
     @branch = Branch.create!(
       business: @business,
       name: "Sucursal Centro",
@@ -56,6 +59,27 @@ class Api::Portal::ProductsControllerTest < ActionDispatch::IntegrationTest
     assert_equal @product.id, product["id"]
     assert_equal "38.0", product["stock_quantity"].to_f.to_s
     assert_equal "ok", product["stock_status"]
+  end
+
+  test "limits branch context and stock to assigned branches" do
+    second_branch = Branch.create!(business: @business, name: "Sucursal Norte", code: "NTE")
+    InventoryBalance.create!(business: @business, branch: second_branch, product: @product, quantity: 99)
+    cashier = User.create!(name: "Caja Centro", email: "caja-centro@example.test", password: "password123")
+    membership = Membership.create!(business: @business, user: cashier, role: "member")
+    BranchAssignment.create!(membership: membership, branch: @branch, role: "cashier")
+    sign_in_as cashier
+
+    get context_api_portal_business_url(@business)
+
+    assert_response :success
+    assert_equal [ @branch.id ], response.parsed_body["branches"].pluck("id")
+    assert_equal @branch.id, response.parsed_body.dig("branch", "id")
+    assert_equal "cashier", response.parsed_body.dig("membership", "role")
+    assert_includes response.parsed_body.dig("membership", "permissions"), "create_sale"
+
+    get api_portal_business_products_url(@business), params: { branch_id: second_branch.id }
+
+    assert_response :not_found
   end
 
   test "searches products" do

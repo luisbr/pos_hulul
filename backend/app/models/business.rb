@@ -26,25 +26,53 @@ class Business < ApplicationRecord
   has_many :sales, dependent: :restrict_with_exception
   has_many :sale_items, dependent: :restrict_with_exception
   has_many :payments, dependent: :restrict_with_exception
+  has_many :audit_events, dependent: :restrict_with_exception
 
   validates :commercial_name, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :license_status, inclusion: { in: LICENSE_STATUSES }
 
-  def setup_missing_fields(branch = nil)
+  def company_setup_missing_fields
     [
       ("commercial_name" if placeholder_or_blank?(commercial_name, COMMERCIAL_NAME_PLACEHOLDER)),
       ("legal_name" if placeholder_or_blank?(legal_name, LEGAL_NAME_PLACEHOLDER)),
       ("rfc" if placeholder_or_blank?(rfc, RFC_PLACEHOLDER)),
       ("primary_contact_name" if primary_contact_name.blank?),
       ("phone" if phone.blank?),
-      ("email" if email.blank?),
-      ("branch_name" if branch.nil? || placeholder_or_blank?(branch.name, BRANCH_NAME_PLACEHOLDER))
+      ("email" if email.blank?)
     ].compact
+  end
+
+  def branch_setup_missing_fields(branch)
+    return [ "branch" ] unless branch
+
+    [
+      ("branch_name" if placeholder_or_blank?(branch.name, BRANCH_NAME_PLACEHOLDER)),
+      ("branch_address" if branch.address.blank?),
+      ("cash_register" unless branch.cash_registers.where(active: true).exists?)
+    ].compact
+  end
+
+  def setup_missing_fields(branch = nil)
+    company_setup_missing_fields + branch_setup_missing_fields(branch)
   end
 
   def setup_complete?(branch = nil)
     setup_missing_fields(branch).empty?
+  end
+
+  def cash_setup_missing_fields(branch)
+    branch_setup_missing_fields(branch) + [
+      ("unit" unless units.exists?),
+      ("category" unless product_categories.exists?),
+      ("supplier" unless suppliers.where(active: true).exists?),
+      ("product" unless products.where(active: true).exists?),
+      ("stock" unless inventory_balances.where(branch: branch).where("quantity > 0").exists?)
+    ].compact
+  end
+
+  def cash_setup_ready?(branch)
+    cash_setup_missing_fields(branch).empty?
   end
 
   private

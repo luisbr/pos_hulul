@@ -14,6 +14,8 @@ Incluido:
   - Salida de efectivo
   - Abono a credito
 - Cierre de caja con efectivo contado y notas.
+- Marcado automatico de turno como pendiente de cierre al cruzar el dia operativo configurado.
+- Cierre forzado autorizado con motivo.
 - Bitacora reciente de movimientos.
 - Recalculo de efectivo esperado despues de cada movimiento.
 
@@ -32,6 +34,7 @@ Rutas:
 - `GET /api/portal/businesses/:business_id/context`
 - `POST /api/portal/businesses/:business_id/cash_register_session`
 - `POST /api/portal/businesses/:business_id/cash_register_session/close`
+- `POST /api/portal/businesses/:business_id/cash_register_session/force_close`
 - `GET /api/portal/businesses/:business_id/cash_movements`
 - `POST /api/portal/businesses/:business_id/cash_movements`
 
@@ -43,11 +46,14 @@ Servicios:
 
 Reglas:
 
-- Solo puede existir una sesion abierta por caja.
+- Solo puede existir una sesion activa por caja: `open` o `pending_close`.
 - El esperado se recalcula con la suma de `cash_movements`.
-- `cash_out`, `refund` y `closing_adjustment` requieren motivo.
+- `cash_out`, `refund`, `closing_adjustment` y `forced_closure` requieren motivo.
 - No se puede registrar movimiento si la caja esta cerrada.
 - No se puede vender sin caja abierta.
+- Si una sesion abierta cruza el dia operativo de la sucursal, queda en `pending_close`.
+- Una caja en `pending_close` bloquea nuevas ventas hasta cierre normal o cierre forzado.
+- El cierre forzado registra `forced_closed`, `force_close_reason` y un movimiento `forced_closure` en bitacora.
 
 ## Frontend
 
@@ -66,7 +72,9 @@ Comportamiento:
 
 - Si no hay caja abierta, se puede abrir desde UI.
 - Si hay caja abierta, se pueden registrar salidas y abonos.
+- Si la caja queda pendiente de cierre, el POS muestra bloqueo y envia a cierre de caja.
 - El cierre captura contado y calcula diferencia contra esperado.
+- El cierre forzado requiere motivo.
 - La bitacora usa los movimientos de la sesion actual cuando existe.
 
 ## Campos
@@ -85,6 +93,7 @@ Comportamiento:
 
 - Efectivo contado
 - Notas de cierre
+- Motivo de cierre forzado
 
 ## Criterios de Aceptacion
 
@@ -93,6 +102,9 @@ Comportamiento:
 - El esperado visible cambia despues del movimiento.
 - Un usuario puede cerrar caja y ver la diferencia.
 - Venta sigue bloqueada cuando no existe sesion abierta.
+- Una caja que cruza el dia operativo queda pendiente de cierre.
+- Una caja pendiente de cierre bloquea ventas nuevas.
+- El cierre forzado exige motivo y queda en bitacora.
 
 ## Pendientes Recomendados
 

@@ -20,6 +20,8 @@ module Sales
       existing_sale = @business.sales.find_by(idempotency_key: @idempotency_key)
       return existing_sale if existing_sale
 
+      @session&.mark_pending_close_if_expired!
+      raise ArgumentError, "La caja esta pendiente de cierre. Cierra o fuerza el cierre antes de vender." if @session&.pending_close?
       raise ArgumentError, "La caja debe estar abierta" unless @session&.open?
       raise ArgumentError, "La caja no pertenece a la sesion abierta" unless @session.cash_register == @cash_register
       raise ArgumentError, "Agrega al menos un producto" if @items.blank?

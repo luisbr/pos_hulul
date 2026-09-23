@@ -301,7 +301,7 @@ server {
 ## Riesgos conocidos antes de deploy real
 
 - CORS sigue preparado para localhost, no para dominio final.
-- No hay aun usuarios/roles; el MVP actual es monousuario operativo.
+- Usuarios, roles, membresias, Admin Hulul y bitacora base ya existen; falta configurar dominio/CORS final y pagos por empresa.
 - No hay sync offline todavia.
 - No hay pipeline automatizado de CI/CD documentado; el primer deploy sera manual.
 

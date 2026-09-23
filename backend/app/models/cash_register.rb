@@ -10,6 +10,6 @@ class CashRegister < ApplicationRecord
   validates :current_folio_number, numericality: { only_integer: true, greater_than: 0 }
 
   def current_session
-    cash_register_sessions.open.order(opened_at: :desc).first
+    cash_register_sessions.active.order(opened_at: :desc).first
   end
 end

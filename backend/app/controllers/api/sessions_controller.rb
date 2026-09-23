@@ -22,6 +22,7 @@ class Api::SessionsController < ApplicationController
         {
           id: item.business_id,
           commercial_name: item.business.commercial_name,
+          status: item.business.status,
           role: item.role
         }
       end

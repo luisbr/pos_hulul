@@ -7,6 +7,9 @@ class Api::Portal::SuppliersControllerTest < ActionDispatch::IntegrationTest
       status: "active",
       license_status: "trial"
     )
+    @user = User.create!(name: "Ana Martinez", email: "ana-suppliers@example.test", password: "password123")
+    Membership.create!(business: @business, user: @user, role: "owner")
+    sign_in_as @user
     @supplier = Supplier.create!(
       business: @business,
       commercial_name: "Aceros del Centro",

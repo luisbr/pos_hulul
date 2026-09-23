@@ -10,7 +10,8 @@ class Api::Portal::CashMovementsControllerTest < ActionDispatch::IntegrationTest
     @branch = Branch.create!(business: @business, name: "Sucursal Centro", code: "TOL")
     @cash_register = CashRegister.create!(business: @business, branch: @branch, name: "Caja 1", code: "001")
     @user = User.create!(name: "Ana Martinez", email: "ana@example.test", password: "password123")
-    Membership.create!(business: @business, user: @user, role: "cashier")
+    Membership.create!(business: @business, user: @user, role: "manager")
+    sign_in_as @user
     @session = ::Cash::SessionOpener.call(
       business: @business,
       branch: @branch,

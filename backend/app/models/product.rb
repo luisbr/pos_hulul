@@ -9,6 +9,7 @@ class Product < ApplicationRecord
   has_many :inventory_balances, dependent: :restrict_with_exception
   has_many :inventory_movements, dependent: :restrict_with_exception
   has_many :sale_items, dependent: :restrict_with_exception
+  has_many :audit_events, as: :auditable, dependent: :restrict_with_exception
 
   validates :name, :sku, :sale_price_cents, :tax_mode, presence: true
   validates :sku, uniqueness: { scope: :business_id }

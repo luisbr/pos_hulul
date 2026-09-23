@@ -239,15 +239,33 @@ Objetivo: mientras entra retro del usuario final, preparar control interno y vis
 
 Objetivo: proteger acciones sensibles.
 
+- Estado usuarios: modulo ABC inicial completado. Detalle en `docs/modules/USERS.md`.
+- Estado multiempresa operativo: base protegida por membresia activa, selector de empresa activa y bloqueo operativo por estado de empresa.
+- Estado selector empresa activa: completado en frontend.
+- Estado permisos: matriz base completada en backend y reflejada en UI.
+- Estado Admin Hulul: API protegida por roles internos y pantalla interna para listar empresas y activar/suspender.
+
+- Crear usuarios operativos.
+- Asignar rol por negocio.
+- Activar o desactivar membresia.
+- Selector de empresa activa en frontend para usuarios con varias empresas. Estado: completado.
+- Persistir empresa activa elegida por usuario. Estado: completado.
+- Bloquear operacion de empresas suspendidas o canceladas. Estado: completado por `business.status`; pagos/licencia queda para el final.
+- Proteger endpoints admin Hulul con rol interno. Estado: completado.
+- Crear pantalla Admin Hulul para ver empresas y activar/suspender desde UI. Estado: completado.
+- Definir pagos por empresa: monto, periodicidad, vencimiento, historial y regla de suspension automatica.
 - Permiso para cancelar venta.
 - Permiso para ajustar inventario.
 - Permiso para cerrar caja.
-- Permiso para cambiar precio o descuento.
+- Permiso para administrar productos y precios.
 - Validacion en backend, no solo frontend.
 
 Criterio de aceptacion:
 
 - Un usuario sin permiso no puede ejecutar la accion desde API.
+- Un usuario con varias empresas puede cambiar de empresa sin cerrar sesion.
+- La API no permite leer ni modificar informacion de una empresa donde el usuario no tenga membresia activa.
+- Las acciones operativas quedan registradas con el usuario autenticado, no con un ID enviado por el navegador.
 
 #### 2. Reportes Basicos
 

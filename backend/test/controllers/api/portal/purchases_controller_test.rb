@@ -10,6 +10,7 @@ class Api::Portal::PurchasesControllerTest < ActionDispatch::IntegrationTest
     @branch = Branch.create!(business: @business, name: "Sucursal Centro", code: "TOL")
     @user = User.create!(name: "Luis Buendia", email: "luis-purchase@example.test", password: "password123")
     Membership.create!(business: @business, user: @user, role: "owner")
+    sign_in_as @user
     @supplier = Supplier.create!(business: @business, commercial_name: "Aceros del Centro")
     @category = ProductCategory.create!(business: @business, name: "Acero")
     @unit = Unit.create!(business: @business, name: "Pieza", abbreviation: "pza")

@@ -1,5 +1,8 @@
 class Api::Portal::ProductsController < ApplicationController
   require "csv"
+  before_action :require_portal_business!
+  before_action :require_active_portal_business!, only: %i[create update import_preview import_commit]
+  before_action -> { require_permission!("manage_products") }, only: %i[create update import_preview import_commit]
 
   def index
     products = business.products
@@ -20,6 +23,16 @@ class Api::Portal::ProductsController < ApplicationController
 
   def create
     product = business.products.create!(product_params)
+    record_audit_event!(
+      business: business,
+      event_type: "product.created",
+      auditable: product,
+      metadata: {
+        sku: product.sku,
+        name: product.name,
+        sale_price_cents: product.sale_price_cents
+      }
+    )
 
     render json: product_json(product.reload, branch:), status: :created
   rescue ActiveRecord::RecordInvalid => error
@@ -29,6 +42,16 @@ class Api::Portal::ProductsController < ApplicationController
   def update
     product = business.products.find(params[:id])
     product.update!(product_params)
+    record_audit_event!(
+      business: business,
+      event_type: "product.updated",
+      auditable: product,
+      metadata: {
+        sku: product.sku,
+        name: product.name,
+        changed_fields: product.previous_changes.keys - %w[updated_at]
+      }
+    )
 
     render json: product_json(product.reload, branch:)
   rescue ActiveRecord::RecordInvalid => error
@@ -79,6 +102,16 @@ class Api::Portal::ProductsController < ApplicationController
       file: import_file,
       created_by: import_user
     )
+    record_audit_event!(
+      business: business,
+      event_type: "products.imported",
+      auditable: business,
+      metadata: {
+        branch_id: branch.id,
+        imported_count: result[:imported_count],
+        errors_count: result[:errors].size
+      }
+    )
 
     status = result[:errors].any? ? :unprocessable_entity : :created
     render json: result, status: status
@@ -91,11 +124,11 @@ class Api::Portal::ProductsController < ApplicationController
   private
 
   def business
-    @business ||= Business.find(params[:business_id])
+    portal_business
   end
 
   def branch
-    @branch ||= params[:branch_id].present? ? business.branches.find(params[:branch_id]) : business.branches.find(&:active)
+    @branch ||= portal_branch(params[:branch_id])
   end
 
   def product_params
@@ -126,9 +159,7 @@ class Api::Portal::ProductsController < ApplicationController
   end
 
   def import_user
-    return unless params[:created_by_id].present?
-
-    business.users.find(params[:created_by_id])
+    portal_actor
   end
 
   def product_json(product, branch:)
