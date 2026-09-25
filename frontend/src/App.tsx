@@ -1389,7 +1389,12 @@ function App() {
           setActiveView((currentView) => {
             if (currentView === 'Admin Hulul') return currentView
             if (!permissionsAllowView(currentView, context.membership.permissions)) return 'Inicio'
-            return onboardingReady || !canManageSetup ? currentView : 'Configuracion'
+            // Keep setup destinations reachable while onboarding is incomplete. The
+            // onboarding action changes the current view first; forcing every view
+            // back to Configuracion here made actions such as "Crear unidad" loop.
+            return !onboardingReady && canManageSetup && currentView === 'Venta'
+              ? 'Configuracion'
+              : currentView
           })
           if (!onboardingReady && activeView !== 'Admin Hulul') {
             setSaleMessage(canManageSetup
