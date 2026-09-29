@@ -1039,8 +1039,12 @@ function App() {
   // Demo credentials are deliberately opt-in so they are never exposed to
   // ordinary users on the production login screen.
   const shouldPrefillOwnerDemo = new URLSearchParams(window.location.search).get('owner') === '1'
+  const invitationToken = new URLSearchParams(window.location.search).get('invite')
   const [loginEmail, setLoginEmail] = useState(shouldPrefillOwnerDemo ? 'luis.buendia@hulul.com.mx' : '')
   const [loginPassword, setLoginPassword] = useState(shouldPrefillOwnerDemo ? 'Abc123456' : '')
+  const [invitationPassword, setInvitationPassword] = useState('')
+  const [invitationPasswordConfirmation, setInvitationPasswordConfirmation] = useState('')
+  const [isAcceptingInvitation, setIsAcceptingInvitation] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -1481,6 +1485,29 @@ function App() {
       setLoginError(error instanceof Error ? error.message : 'No se pudo iniciar sesion.')
     } finally {
       setIsLoggingIn(false)
+    }
+  }
+
+  async function acceptInvitation() {
+    if (!invitationToken) return
+    setIsAcceptingInvitation(true)
+    setLoginError(null)
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/invitations/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: invitationToken, password: invitationPassword, password_confirmation: invitationPasswordConfirmation }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.errors?.join(', ') ?? 'No se pudo activar el acceso.')
+      setLoginEmail(body.email || '')
+      setLoginPassword('')
+      window.history.replaceState({}, '', window.location.pathname)
+      setLoginError('Acceso activado. Inicia sesión con tu nueva contraseña.')
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'No se pudo activar el acceso.')
+    } finally {
+      setIsAcceptingInvitation(false)
     }
   }
 
@@ -3834,6 +3861,16 @@ function App() {
             <h1>Iniciar sesion</h1>
             <p>Accede para operar ventas, inventario y caja.</p>
           </div>
+          {invitationToken ? (
+            <form className="product-form login-form" onSubmit={(event) => { event.preventDefault(); void acceptInvitation() }}>
+              <h2>Activa tu acceso</h2>
+              <p>Define una contraseña para entrar a Hulul POS.</p>
+              <label><span>Nueva contraseña</span><input autoComplete="new-password" minLength={8} onChange={(event) => setInvitationPassword(event.target.value)} required type="password" value={invitationPassword} /></label>
+              <label><span>Confirmar contraseña</span><input autoComplete="new-password" minLength={8} onChange={(event) => setInvitationPasswordConfirmation(event.target.value)} required type="password" value={invitationPasswordConfirmation} /></label>
+              <div className="actions-row form-actions"><button className="primary-button login-button" disabled={isAcceptingInvitation} type="submit">{isAcceptingInvitation ? 'Activando...' : 'Activar acceso'}</button></div>
+              {loginError ? <p className="sale-message form-message login-error">{loginError}</p> : null}
+            </form>
+          ) : (
           <form
             className="product-form login-form"
             onSubmit={(event) => {
@@ -3866,6 +3903,7 @@ function App() {
             </div>
             {loginError ? <p className="sale-message form-message login-error">{loginError}</p> : null}
           </form>
+          )}
         </section>
       </div>
     )

@@ -2,6 +2,7 @@ Rails.application.routes.draw do
   namespace :api do
     get "health", to: "health#show"
     post "session", to: "sessions#create"
+    post "invitations/accept", to: "invitations#accept"
     resource :profile, only: %i[show update]
 
     namespace :admin do

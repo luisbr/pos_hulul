@@ -1,3 +1,5 @@
+require "securerandom"
+
 class Api::Admin::BusinessesController < ApplicationController
   before_action :require_admin_access!
   before_action :require_hulul_admin!, only: %i[create update]
@@ -15,15 +17,29 @@ class Api::Admin::BusinessesController < ApplicationController
   end
 
   def create
-    business = Business.create!(business_params)
-    record_audit_event!(
-      business: business,
-      event_type: "business.created",
-      auditable: business,
-      metadata: { status: business.status, license_status: business.license_status }
-    )
+    business = nil
+    owner = nil
+    ActiveRecord::Base.transaction do
+      business = Business.create!(business_params)
+      if business.email.present?
+        if User.exists?(email: business.email)
+          business.errors.add(:email, "ya está asociado a un usuario")
+          raise ActiveRecord::RecordInvalid, business
+        end
 
-    render json: business_detail(business), status: :created
+        owner = User.create!(name: business.primary_contact_name.presence || business.commercial_name, email: business.email, password: SecureRandom.urlsafe_base64(32), active: true)
+        Membership.create!(business:, user: owner, role: "owner", active: true)
+      end
+      record_audit_event!(
+        business: business,
+        event_type: "business.created",
+        auditable: business,
+        metadata: { status: business.status, license_status: business.license_status }
+      )
+    end
+    invitation_sent = owner.present? ? Onboarding::InvitationSender.call(user: owner, business: business) : false
+
+    render json: business_detail(business).merge(invitation_sent:), status: :created
   rescue ActiveRecord::RecordInvalid => error
     render json: { errors: error.record.errors.full_messages }, status: :unprocessable_entity
   end
