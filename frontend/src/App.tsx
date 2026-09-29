@@ -1036,8 +1036,11 @@ function App() {
       return null
     }
   })
-  const [loginEmail, setLoginEmail] = useState('luis.buendia@hulul.com.mx')
-  const [loginPassword, setLoginPassword] = useState('Abc123456')
+  // Demo credentials are deliberately opt-in so they are never exposed to
+  // ordinary users on the production login screen.
+  const shouldPrefillOwnerDemo = new URLSearchParams(window.location.search).get('owner') === '1'
+  const [loginEmail, setLoginEmail] = useState(shouldPrefillOwnerDemo ? 'luis.buendia@hulul.com.mx' : '')
+  const [loginPassword, setLoginPassword] = useState(shouldPrefillOwnerDemo ? 'Abc123456' : '')
   const [loginError, setLoginError] = useState<string | null>(null)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
